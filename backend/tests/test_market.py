@@ -141,7 +141,9 @@ class TestWatchlist:
         assert "ETH-USD" in WATCHLIST
         assert "AAPL" in WATCHLIST
         assert "SPY" in WATCHLIST
-        assert len(WATCHLIST) == 4
+        assert "^NSEI" in WATCHLIST
+        assert "^NSEBANK" in WATCHLIST
+        assert len(WATCHLIST) == 6
     
     def test_yf_interval_mapping(self):
         assert YF_INTERVAL["1m"] == "1m"
@@ -215,3 +217,174 @@ class TestLiveDataFallback:
         assert meta["source"] in ["YAHOO FINANCE", "MOCK GENERATOR"]
         assert meta["status"] in ["DELAYED", "SIMULATED"]
         assert meta["label"] == "PAPER/SIMULATED"
+
+
+class TestDataQuality:
+    """Tests for data quality validation and metadata."""
+    
+    def test_ohlc_validation_fixes_inconsistencies(self):
+        """Test that _validate_ohlc fixes common OHLC issues."""
+        from app.services.market import _validate_ohlc
+        import pandas as pd
+        import numpy as np
+        
+        # Create DataFrame with OHLC issues
+        df = pd.DataFrame({
+            "open": [100, 101, 102],
+            "high": [99, 103, 101],   # high < close on row 0, high < open on row 2
+            "low": [102, 100, 103],   # low > open on row 0, low > close on row 1
+            "close": [101, 102, 100],
+            "volume": [1000, 1000, 1000],
+        })
+        
+        df_clean, issues = _validate_ohlc(df)
+        
+        # Issues should be reported
+        assert len(issues) > 0
+        
+        # OHLC should now be consistent
+        assert (df_clean["high"] >= df_clean[["open", "close"]].max(axis=1)).all()
+        assert (df_clean["low"] <= df_clean[["open", "close"]].min(axis=1)).all()
+        assert (df_clean["high"] >= df_clean["low"]).all()
+    
+    def test_ohlc_validation_positive_prices(self):
+        """Test that _validate_ohlc fixes non-positive prices."""
+        from app.services.market import _validate_ohlc
+        import pandas as pd
+        
+        df = pd.DataFrame({
+            "open": [100, -1, 102],
+            "high": [101, 102, 103],
+            "low": [99, 100, 101],
+            "close": [100, 101, 102],
+            "volume": [1000, 1000, 1000],
+        })
+        
+        df_clean, issues = _validate_ohlc(df)
+        
+        assert any("Non-positive" in issue for issue in issues)
+        assert (df_clean["open"] > 0).all()
+    
+    def test_gap_detection(self):
+        """Test gap detection in time series."""
+        from app.services.market import _detect_gaps_duplicates
+        import pandas as pd
+        
+        # Create data with a gap
+        idx = pd.date_range("2024-01-01", periods=5, freq="D")
+        idx = idx.delete(2)  # Remove middle day
+        df = pd.DataFrame({
+            "open": [100, 101, 102, 103],
+            "high": [101, 102, 103, 104],
+            "low": [99, 100, 101, 102],
+            "close": [100, 101, 102, 103],
+            "volume": [1000, 1000, 1000, 1000],
+        }, index=idx)
+        
+        gaps, duplicates = _detect_gaps_duplicates(df, "1d")
+        
+        assert len(gaps) > 0
+        assert "missing" in gaps[0].lower()
+    
+    def test_duplicate_detection(self):
+        """Test duplicate timestamp detection."""
+        from app.services.market import _detect_gaps_duplicates
+        import pandas as pd
+        
+        # Create data with duplicate timestamps
+        idx = pd.DatetimeIndex(["2024-01-01", "2024-01-02", "2024-01-02", "2024-01-03"])
+        df = pd.DataFrame({
+            "open": [100, 101, 102, 103],
+            "high": [101, 102, 103, 104],
+            "low": [99, 100, 101, 102],
+            "close": [100, 101, 102, 103],
+            "volume": [1000, 1000, 1000, 1000],
+        }, index=idx)
+        
+        gaps, duplicates = _detect_gaps_duplicates(df, "1d")
+        
+        assert len(duplicates) > 0
+        assert "duplicate" in duplicates[0].lower()
+
+
+class TestCacheBehavior:
+    """Tests for cache write-through behavior."""
+    
+    def test_cache_write_through(self, monkeypatch):
+        """Test that _upsert_market_bars writes to db."""
+        from app.services.market import _upsert_market_bars
+        from unittest.mock import MagicMock, patch
+        import pandas as pd
+        
+        df = pd.DataFrame({
+            "open": [100, 101],
+            "high": [101, 102],
+            "low": [99, 100],
+            "close": [100, 101],
+            "volume": [1000, 1000],
+        }, index=pd.date_range("2024-01-01", periods=2, freq="D"))
+        
+        mock_db = MagicMock()
+        # Mock the query chain: db.query(MarketBar).filter(...).first()
+        mock_query = MagicMock()
+        mock_filter = MagicMock()
+        
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_filter
+        mock_filter.first.return_value = None  # Direct None, not a mock
+        
+        with patch("app.models.MarketBar") as mock_bar_class:
+            mock_bar = MagicMock()
+            mock_bar_class.return_value = mock_bar
+            
+            count = _upsert_market_bars(mock_db, df, "BTC-USD", "1d", "MOCK GENERATOR")
+            
+            assert count == 2
+            mock_db.add.assert_called()
+            mock_db.commit.assert_called()
+    
+    def test_meta_includes_data_quality(self, monkeypatch):
+        """Test that meta includes data_quality field with issues, gaps, duplicates."""
+        from app.services.market import get_bars
+        
+        monkeypatch.setenv("USE_LIVE_DATA", "false")
+        df, meta = get_bars("BTC-USD", "1d", 30)
+        
+        assert "data_quality" in meta
+        dq = meta["data_quality"]
+        assert "issues" in dq
+        assert "gaps" in dq
+        assert "duplicates" in dq
+        assert "bar_count" in dq
+        assert "cached" in dq
+        assert dq["bar_count"] == 30
+        assert dq["cached"] is False
+
+
+class TestNiftySymbols:
+    """Tests for NIFTY 50 and other Indian index symbols."""
+    
+    def test_nifty_symbols_in_watchlist(self):
+        from app.services.market import WATCHLIST, SYMBOL_NAMES, EXCHANGE_TIMEZONES
+        
+        assert "^NSEI" in WATCHLIST
+        assert "^NSEBANK" in WATCHLIST
+        assert SYMBOL_NAMES["^NSEI"] == "NIFTY 50"
+        assert SYMBOL_NAMES["^NSEBANK"] == "NIFTY Bank"
+        assert EXCHANGE_TIMEZONES["^NSEI"] == "Asia/Kolkata"
+        assert EXCHANGE_TIMEZONES["^NSEBANK"] == "Asia/Kolkata"
+    
+    def test_nifty_mock_data(self, monkeypatch):
+        """Test that NIFTY symbols generate mock data correctly."""
+        from app.services.market import get_bars
+        
+        monkeypatch.setenv("USE_LIVE_DATA", "false")
+        
+        for symbol in ["^NSEI", "^NSEBANK"]:
+            df, meta = get_bars(symbol, "1d", 30)
+            assert len(df) == 30
+            assert meta["symbol"] == symbol
+            assert meta["source"] == "MOCK GENERATOR"
+            assert meta["status"] == "SIMULATED"
+            assert meta["name"] in ["NIFTY 50", "NIFTY Bank"]
+            assert meta["exchange_timezone"] == "Asia/Kolkata"
