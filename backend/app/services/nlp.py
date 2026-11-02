@@ -1,9 +1,23 @@
 """Rule-based natural-language → StrategySpec parser (no LLM key needed). Pure function; never executes anything.
-Returns (spec, clarifications). Swap in any LLM by making it emit StrategySpec JSON — it is validated by Pydantic regardless."""
+Returns (spec, clarifications). Swap in any LLM by making it emit StrategySpec JSON — it is validated by Pydantic regardless.
+Also detects special actions: backtest, deploy, explain."""
 import re
 from ..schemas import StrategySpec, IndicatorSpec, Rule, RiskLimits
 TICKERS = {"BTC": "BTC-USD", "BITCOIN": "BTC-USD", "ETH": "ETH-USD", "ETHEREUM": "ETH-USD", "AAPL": "AAPL", "APPLE": "AAPL", "SPY": "SPY"}
 TF = {"daily": "1d", "day": "1d", "1d": "1d", "hourly": "1h", "1h": "1h", "15m": "15m", "5m": "5m", "1m": "1m"}
+ACTION_KEYWORDS = {
+    "backtest": ["backtest", "run backtest", "test strategy", "simulate", "back test"],
+    "deploy": ["deploy", "paper trade", "start paper", "go live", "activate"],
+    "explain": ["explain", "what is", "describe", "summarize", "show me", "current strategy"],
+}
+def _detect_action(text: str) -> tuple[str | None, dict]:
+    """Detect if user wants to perform a special action."""
+    t = text.lower()
+    for action, keywords in ACTION_KEYWORDS.items():
+        for kw in keywords:
+            if kw in t:
+                return action, {}
+    return None, {}
 def parse(text: str, base: StrategySpec | None = None):
     t = text.lower(); spec = base.model_copy(deep=True) if base else StrategySpec(); ask = []
     for w, sym in TICKERS.items():
@@ -36,5 +50,9 @@ def parse(text: str, base: StrategySpec | None = None):
     if "rsi" in t and re.search(r"rsi[^.]*(below|under)[^.]*(sell|exit)", t): ask.append("Selling when RSI is low contradicts typical mean-reversion. Did you mean above?")
     if not spec.instruments: ask.append("Which instrument? (BTC, ETH, AAPL or SPY)")
     if not spec.entry_rules: ask.append("What should trigger an entry? e.g. 'buy when RSI is below 30' or 'EMA 20 crosses above EMA 50'.")
-    if not spec.exit_rules: ask.append("What should trigger an exit? A stop-loss is set at " + f"{spec.risk.stop_loss_pct}% by default.")
+    if not spec.exit_rules and not spec.risk.stop_loss_pct: ask.append("What should trigger an exit? A stop-loss is set at " + f"{spec.risk.stop_loss_pct}% by default.")
     return spec, ask
+
+def detect_action(text: str) -> tuple[str | None, dict]:
+    """Public function to detect special actions."""
+    return _detect_action(text)

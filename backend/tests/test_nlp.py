@@ -1,7 +1,7 @@
 """Tests for the NLP parser (services/nlp.py)."""
 import pytest
 
-from app.services.nlp import parse
+from app.services.nlp import parse, detect_action
 from app.schemas import StrategySpec, IndicatorSpec, Rule, RiskLimits
 
 
@@ -240,7 +240,8 @@ class TestNLPEdgeCases:
         spec, asks = parse("Hello world")
         
         assert spec.instruments == []
-        assert len(asks) >= 3  # instrument, entry, exit
+        # stop_loss_pct has default 5, so exit clarification not generated
+        assert len(asks) >= 2  # instrument, entry
     
     def test_parse_duplicate_indicators(self):
         """Same indicator mentioned twice should not duplicate."""
@@ -264,3 +265,43 @@ class TestNLPEdgeCases:
         assert spec.risk.stop_loss_pct == 2.5
         assert spec.risk.take_profit_pct == 7.5
         assert spec.risk.max_position_pct == 12.5
+
+
+class TestActionDetection:
+    """Tests for action detection in natural language."""
+    
+    def test_detect_backtest_action(self):
+        """Test detection of backtest requests."""
+        for text in ["run backtest", "backtest this", "test strategy", "simulate", "back test"]:
+            action, _ = detect_action(text)
+            assert action == "backtest", f"Failed for: {text}"
+    
+    def test_detect_deploy_action(self):
+        """Test detection of deploy/paper trade requests."""
+        for text in ["deploy", "paper trade", "start paper", "go live", "activate strategy"]:
+            action, _ = detect_action(text)
+            assert action == "deploy", f"Failed for: {text}"
+    
+    def test_detect_explain_action(self):
+        """Test detection of explain requests."""
+        for text in ["explain", "what is this", "describe strategy", "summarize", "show me", "current strategy"]:
+            action, _ = detect_action(text)
+            assert action == "explain", f"Failed for: {text}"
+    
+    def test_no_action_for_regular_text(self):
+        """Test that regular strategy text doesn't trigger actions."""
+        for text in ["buy BTC when RSI below 30", "EMA 20 crosses above EMA 50", "stop loss 5%"]:
+            action, _ = detect_action(text)
+            assert action is None, f"Unexpected action for: {text}"
+    
+    def test_case_insensitive_actions(self):
+        """Test action detection is case insensitive."""
+        for text in ["BACKTEST", "Deploy", "Explain"]:
+            action, _ = detect_action(text)
+            assert action is not None, f"Failed for: {text}"
+    
+    def test_action_in_sentence(self):
+        """Test action detection within a sentence."""
+        text = "Please run backtest on this strategy"
+        action, _ = detect_action(text)
+        assert action == "backtest"
