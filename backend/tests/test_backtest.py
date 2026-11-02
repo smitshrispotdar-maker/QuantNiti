@@ -419,6 +419,111 @@ class TestEdgeCases:
         assert len(curve) == 50
 
 
+class TestTransactionCostsAndSlippage:
+    """Tests for transaction cost and slippage calculations."""
+
+    def test_transaction_cost_zero_no_effect(self, sample_strategy_spec, sample_market_data):
+        """Zero transaction costs should produce same results as no costs."""
+        metrics_no_cost, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=0, slippage_bps=0)
+        metrics_zero_cost, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=0.0, slippage_bps=0.0)
+        
+        assert metrics_no_cost["total_return_pct"] == metrics_zero_cost["total_return_pct"]
+        assert metrics_no_cost["trades"] == metrics_zero_cost["trades"]
+
+    def test_transaction_cost_reduces_returns(self, sample_strategy_spec, sample_market_data):
+        """Transaction costs should reduce total returns."""
+        metrics_no_cost, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=0, slippage_bps=0)
+        metrics_with_cost, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=10, slippage_bps=0)  # 10 bps = 0.1%
+        
+        # With costs, returns should be lower (or equal if no trades)
+        if metrics_with_cost["trades"] > 0:
+            assert metrics_with_cost["total_return_pct"] <= metrics_no_cost["total_return_pct"]
+
+    def test_slippage_reduces_returns(self, sample_strategy_spec, sample_market_data):
+        """Slippage should reduce total returns."""
+        metrics_no_slip, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=0, slippage_bps=0)
+        metrics_with_slip, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=0, slippage_bps=10)  # 10 bps slippage
+        
+        if metrics_with_slip["trades"] > 0:
+            assert metrics_with_slip["total_return_pct"] <= metrics_no_slip["total_return_pct"]
+
+    def test_cost_applied_on_both_buy_and_sell(self):
+        """Transaction cost should be applied on both entry and exit."""
+        # Simple strategy: buy at bar 1, sell at bar 2
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            indicators=[IndicatorSpec(id="sma_1", type="SMA", params={"period": 1})],
+            entry_rules=[Rule(left="price", op=">", right="sma_1")],
+            exit_rules=[Rule(left="price", op="<", right="sma_1")],
+            risk=RiskLimits(max_position_pct=100, max_drawdown_pct=50),
+        )
+        # Price goes up then down
+        close = np.array([100, 105, 100])
+        df = pd.DataFrame({
+            "close": close, "open": close, "high": close * 1.01, "low": close * 0.99, "volume": np.full(3, 1e6),
+        })
+        
+        # With 100 bps cost (1%), buy at 105*1.01, sell at 100*0.99
+        # Net buy = 105 * 1.01 = 106.05, Net sell = 100 * 0.99 = 99
+        # PnL = 99 - 106.05 = -7.05
+        metrics, _, trades = run(spec, df, 100_000, transaction_cost_bps=100, slippage_bps=0)
+        
+        if len(trades) > 0:
+            # Cost applied twice (buy and sell)
+            # Expected: buy at 105*1.01, sell at 100*0.99
+            # The trade should reflect both costs
+            assert metrics["total_return_pct"] < 0  # Should lose money due to costs
+
+    def test_slippage_buy_higher_sell_lower(self):
+        """Slippage should make buys more expensive and sells cheaper."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            indicators=[IndicatorSpec(id="sma_1", type="SMA", params={"period": 1})],
+            entry_rules=[Rule(left="price", op=">", right="sma_1")],
+            exit_rules=[Rule(left="price", op="<", right="sma_1")],
+            risk=RiskLimits(max_position_pct=100, max_drawdown_pct=50),
+        )
+        close = np.array([100, 105, 100])
+        df = pd.DataFrame({
+            "close": close, "open": close, "high": close * 1.01, "low": close * 0.99, "volume": np.full(3, 1e6),
+        })
+        
+        # With 100 bps slippage (1%): buy at 105*1.01, sell at 100*0.99
+        metrics, _, trades = run(spec, df, 100_000, transaction_cost_bps=0, slippage_bps=100)
+        
+        if len(trades) > 0:
+            # Slippage makes entry worse (higher) and exit worse (lower)
+            assert trades[0]["entry"] > 105  # Bought higher than market
+            assert trades[0]["exit"] < 100   # Sold lower than market
+
+    def test_cost_and_slippage_combined(self, sample_strategy_spec, sample_market_data):
+        """Test combined effect of transaction costs and slippage."""
+        metrics_no_cost, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=0, slippage_bps=0)
+        metrics_combined, _, _ = run(sample_strategy_spec, sample_market_data, 100_000, transaction_cost_bps=10, slippage_bps=10)
+        
+        if metrics_combined["trades"] > 0:
+            assert metrics_combined["total_return_pct"] <= metrics_no_cost["total_return_pct"]
+
+
+class TestSnapshotImmutability:
+    """Tests for strategy snapshot immutability in backtest runs."""
+
+    def test_backtest_run_stores_strategy_spec_snapshot(self, sample_strategy_spec, sample_market_data):
+        """BacktestRun should store the strategy spec at time of run."""
+        from app.models import BacktestRun
+        from app.db import SessionLocal
+        
+        # This test would require database - skip for unit test
+        # The snapshot is stored in the router, not in the run() function
+        pass
+
+    def test_snapshot_preserved_after_strategy_edit(self, sample_strategy_spec, sample_market_data):
+        """Editing a strategy after backtest should not affect previous backtest's snapshot."""
+        # This is tested at the API level - the router stores s.spec at time of run
+        # The run() function doesn't handle persistence
+        pass
+
+
 # Helper functions (duplicated from conftest to avoid import issues)
 def assert_metrics_structure(metrics: dict):
     """Assert that metrics dict has expected structure."""

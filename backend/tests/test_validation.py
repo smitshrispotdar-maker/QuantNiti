@@ -381,3 +381,177 @@ class TestValidationIntegration:
         
         result = validate(spec, {"trades": 99, "max_drawdown_pct": 0})
         assert result["passed"] is True
+
+
+class TestEnhancedValidation:
+    """Tests for enhanced validation features added in Phase 4 continuation."""
+    
+    def test_invalid_indicator_type_rejected(self):
+        """Unsupported indicator types should be rejected by schema."""
+        # This is caught at schema level - test passes if it raises
+        with pytest.raises(Exception):
+            StrategySpec(
+                instruments=["BTC-USD"],
+                indicators=[IndicatorSpec(id="custom", type="CUSTOM", params={"period": 10})],
+                entry_rules=[Rule(left="custom", op=">", right="price")],
+                exit_rules=[Rule(left="price", op="<", right=100)],
+            )
+    
+    def test_indicator_param_out_of_range_rejected(self):
+        """Indicator parameters outside valid ranges should be rejected by our validation."""
+        # Schema allows period up to 500 for EMA, so test with 600 which passes schema but fails our validation
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            indicators=[IndicatorSpec(id="ema_20", type="EMA", params={"period": 600})],  # > 500 (our limit)
+            entry_rules=[Rule(left="ema_20", op=">", right="price")],
+            exit_rules=[Rule(left="price", op="<", right=100)],
+        )
+        
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0})
+        assert result["passed"] is False
+        assert any("must be between" in e for e in result["errors"])
+    
+    def test_indicator_unknown_param_rejected(self):
+        """Unknown indicator parameters should be rejected by our validation."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            indicators=[IndicatorSpec(id="ema_20", type="EMA", params={"unknown_param": 20})],
+            entry_rules=[Rule(left="ema_20", op=">", right="price")],
+            exit_rules=[Rule(left="price", op="<", right=100)],
+        )
+        
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0})
+        assert result["passed"] is False
+        assert any("unknown parameter" in e for e in result["errors"])
+    
+    def test_unsupported_instrument_rejected(self):
+        """Unsupported instruments should be rejected by our validation."""
+        spec = StrategySpec(
+            instruments=["INVALID-SYM"],
+            entry_rules=[Rule(left="price", op=">", right=100)],
+            exit_rules=[Rule(left="price", op="<", right=90)],
+        )
+        
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0})
+        assert result["passed"] is False
+        assert any("Unsupported instrument" in e for e in result["errors"])
+    
+    def test_unsupported_timeframe_rejected(self):
+        """Unsupported timeframes should be rejected by schema."""
+        with pytest.raises(Exception):
+            StrategySpec(
+                instruments=["BTC-USD"],
+                timeframe="1w",  # Not supported
+                entry_rules=[Rule(left="price", op=">", right=100)],
+                exit_rules=[Rule(left="price", op="<", right=90)],
+            )
+    
+    def test_invalid_stop_loss_range_rejected(self):
+        """Stop loss outside 0-50% should be rejected by schema."""
+        with pytest.raises(Exception):
+            RiskLimits(stop_loss_pct=150)
+    
+    def test_invalid_take_profit_range_rejected(self):
+        """Take profit outside 0-500% should be rejected by schema."""
+        with pytest.raises(Exception):
+            RiskLimits(take_profit_pct=2000)
+    
+    def test_invalid_max_drawdown_range_rejected(self):
+        """Max drawdown outside 0-100% should be rejected by schema."""
+        with pytest.raises(Exception):
+            RiskLimits(max_drawdown_pct=150)
+    
+    def test_invalid_date_range_rejected(self):
+        """Invalid date range (start >= end) should be rejected by our validation."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            entry_rules=[Rule(left="price", op=">", right=100)],
+            exit_rules=[Rule(left="price", op="<", right=90)],
+        )
+        
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0}, 
+                         start_date="2024-01-10", end_date="2024-01-01")
+        assert result["passed"] is False
+        assert any("start_date must be before end_date" in e for e in result["errors"])
+    
+    def test_valid_date_range_accepted(self):
+        """Valid date range should be accepted."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            entry_rules=[Rule(left="price", op=">", right=100)],
+            exit_rules=[Rule(left="price", op="<", right=90)],
+        )
+        
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0}, 
+                         start_date="2024-01-01", end_date="2024-12-31")
+        assert result["passed"] is True
+    
+    def test_insufficient_bars_for_timeframe_rejected(self):
+        """Insufficient bars for timeframe should be rejected by our validation."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            timeframe="1d",
+            entry_rules=[Rule(left="price", op=">", right=100)],
+            exit_rules=[Rule(left="price", op="<", right=90)],
+        )
+        
+        # Only 10 bars for 1d timeframe (needs 30)
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0}, bars_count=10)
+        assert result["passed"] is False
+        assert any("Insufficient data" in e for e in result["errors"])
+    
+    def test_insufficient_bars_for_indicator_rejected(self):
+        """Insufficient bars for indicator initialization should be rejected."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            timeframe="1d",
+            indicators=[IndicatorSpec(id="ema_200", type="EMA", params={"period": 200})],
+            entry_rules=[Rule(left="ema_200", op=">", right="price")],
+            exit_rules=[Rule(left="price", op="<", right=90)],
+        )
+        
+        # 100 bars but EMA(200) needs 200
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0}, bars_count=100)
+        assert result["passed"] is False
+        assert any("Insufficient data" in e for e in result["errors"])
+    
+    def test_sufficient_bars_for_indicator_accepted(self):
+        """Sufficient bars for indicator should be accepted."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            timeframe="1d",
+            indicators=[IndicatorSpec(id="ema_20", type="EMA", params={"period": 20})],
+            entry_rules=[Rule(left="ema_20", op=">", right="price")],
+            exit_rules=[Rule(left="price", op="<", right=90)],
+        )
+        
+        # 50 bars for EMA(20) - should be enough
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0}, bars_count=50)
+        assert result["passed"] is True
+    
+    def test_macd_insufficient_bars_rejected(self):
+        """MACD with slow+signal periods needs enough bars."""
+        spec = StrategySpec(
+            instruments=["BTC-USD"],
+            timeframe="1d",
+            indicators=[IndicatorSpec(id="macd", type="MACD", params={"fast": 12, "slow": 26, "signal": 9})],
+            entry_rules=[Rule(left="macd", op="crosses_above", right=0)],
+            exit_rules=[Rule(left="macd", op="crosses_below", right=0)],
+        )
+        
+        # MACD needs slow + signal = 26 + 9 = 35 bars minimum
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0}, bars_count=30)
+        assert result["passed"] is False
+        assert any("Insufficient data" in e for e in result["errors"])
+    
+    def test_multi_instrument_rejected(self):
+        """Multi-instrument strategies not yet supported."""
+        spec = StrategySpec(
+            instruments=["BTC-USD", "ETH-USD"],
+            entry_rules=[Rule(left="price", op=">", right=100)],
+            exit_rules=[Rule(left="price", op="<", right=90)],
+        )
+        
+        result = validate(spec, {"trades": 99, "max_drawdown_pct": 0})
+        assert result["passed"] is False
+        assert any("Multi-instrument" in e for e in result["errors"])

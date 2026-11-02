@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Dashboard from '../pages/Dashboard.jsx'
 import Studio from '../pages/Studio.jsx'
 import Builder from '../pages/Builder.jsx'
@@ -8,21 +8,19 @@ import Paper from '../pages/Paper.jsx'
 import Journal from '../pages/Journal.jsx'
 
 // Mock the API module
-vi.mock('../api.jsx', () => {
-  return {
-    api: vi.fn(() => Promise.resolve({})),
-    fmt: (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })),
-    pnlColor: (n) => (n >= 0 ? 'text-up' : 'text-down'),
-    Badge: ({ status }) => <span data-testid="badge">{status}</span>,
-    ErrorBox: ({ err }) => err ? <div data-testid="error">{err.message}</div> : null,
-    watchlistApi: {
-      get: vi.fn(() => Promise.resolve([])),
-      add: vi.fn(() => Promise.resolve({})),
-      remove: vi.fn(() => Promise.resolve({})),
-      symbols: vi.fn(() => Promise.resolve([])),
-    },
-  };
-})
+vi.mock('../api.jsx', () => ({
+  api: vi.fn(() => Promise.resolve({})),
+  fmt: (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })),
+  pnlColor: (n) => (n >= 0 ? 'text-up' : 'text-down'),
+  Badge: ({ status }) => <span data-testid="badge">{status}</span>,
+  ErrorBox: ({ err }) => err ? <div data-testid="error">{err.message}</div> : null,
+  watchlistApi: {
+    get: vi.fn(() => Promise.resolve([])),
+    add: vi.fn(() => Promise.resolve({})),
+    remove: vi.fn(() => Promise.resolve({})),
+    symbols: vi.fn(() => Promise.resolve([])),
+  },
+}))
 
 import { fmt, pnlColor } from '../api.jsx'
 
@@ -60,9 +58,18 @@ describe('Pages render without crashing', () => {
   })
 
   it('renders Backtest', () => {
+    const setDraft = vi.fn()
     const setSaved = vi.fn()
-    const { container } = render(<Backtest setSaved={setSaved} saved={mockSaved} draft={mockDraft} />)
+    const { container } = render(<Backtest setDraft={setDraft} saved={mockSaved} draft={mockDraft} setSaved={setSaved} />)
     expect(container).toBeInTheDocument()
+    // Check for key UI elements
+    expect(screen.getByText('Backtest Configuration')).toBeInTheDocument()
+    expect(screen.getByText('Initial Capital')).toBeInTheDocument()
+    expect(screen.getByText('Transaction Cost (bps)')).toBeInTheDocument()
+    expect(screen.getByText('Slippage (bps)')).toBeInTheDocument()
+    expect(screen.getByText('Start Date')).toBeInTheDocument()
+    expect(screen.getByText('End Date')).toBeInTheDocument()
+    expect(screen.getAllByText('Run backtest').length).toBeGreaterThan(0)
   })
 
   it('renders Paper', () => {
@@ -71,7 +78,7 @@ describe('Pages render without crashing', () => {
   })
 
   it('renders Journal', () => {
-    const { container } = render(<Journal saved={mockSaved} />)
+    const { container } = render(<Journal />)
     expect(container).toBeInTheDocument()
   })
 })

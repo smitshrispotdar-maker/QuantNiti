@@ -10,13 +10,19 @@ def run(body: BacktestIn, db: Session = Depends(get_db)):
     s = db.get(Strategy, body.strategy_id)
     if not s: raise HTTPException(404, "Strategy not found")
     spec = StrategySpec(**s.spec)
-    # Structural validation first
-    pre = validation.validate(spec, {"trades": 99, "max_drawdown_pct": 0})
-    structural = [e for e in pre["errors"] if "backtest" not in e.lower()]
+    # Structural validation first (with enhanced checks)
+    pre = validation.validate(
+        spec, 
+        {"trades": 99, "max_drawdown_pct": 0},
+        bars_count=body.bars,
+        start_date=body.start_date,
+        end_date=body.end_date
+    )
+    structural = [e for e in pre["errors"] if "backtest" not in e.lower() and "run a backtest" not in e.lower()]
     if structural: raise HTTPException(422, {"validation": {"passed": False, "errors": structural, "warnings": pre["warnings"]}})
-    # Additional validation: data availability check
+    # Fetch data
     df, meta = market.get_bars(spec.instruments[0], spec.timeframe, body.bars)
-    # Check if sufficient data for the strategy
+    # Data availability check (also done in validation, but keep as safety net)
     if len(df) < 30:
         raise HTTPException(422, {"validation": {"passed": False, "errors": [f"Insufficient data: only {len(df)} bars available, need at least 30"], "warnings": []}})
     # Run backtest with transaction costs and slippage
