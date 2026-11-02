@@ -8,13 +8,21 @@ import Paper from '../pages/Paper.jsx'
 import Journal from '../pages/Journal.jsx'
 
 // Mock the API module
-vi.mock('../api.jsx', () => ({
-  api: vi.fn(() => Promise.resolve({})),
-  fmt: (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })),
-  pnlColor: (n) => (n >= 0 ? 'text-up' : 'text-down'),
-  Badge: ({ status }) => <span data-testid="badge">{status}</span>,
-  ErrorBox: ({ err }) => err ? <div data-testid="error">{err.message}</div> : null,
-}))
+vi.mock('../api.jsx', () => {
+  return {
+    api: vi.fn(() => Promise.resolve({})),
+    fmt: (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })),
+    pnlColor: (n) => (n >= 0 ? 'text-up' : 'text-down'),
+    Badge: ({ status }) => <span data-testid="badge">{status}</span>,
+    ErrorBox: ({ err }) => err ? <div data-testid="error">{err.message}</div> : null,
+    watchlistApi: {
+      get: vi.fn(() => Promise.resolve([])),
+      add: vi.fn(() => Promise.resolve({})),
+      remove: vi.fn(() => Promise.resolve({})),
+      symbols: vi.fn(() => Promise.resolve([])),
+    },
+  };
+})
 
 import { fmt, pnlColor } from '../api.jsx'
 

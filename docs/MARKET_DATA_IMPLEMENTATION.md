@@ -132,7 +132,7 @@ class MarketBar(Base):
 | Feature | Status | Details |
 |---------|--------|---------|
 | **OHLC Validation** | ✅ Done | `_validate_ohlc()` fixes high<max(open,close), low>min(open,close), high<low, non-positive prices |
-| **Gap Detection** | ✅ Done | `_detect_gaps_duplicates()` detects missing timestamps per timeframe frequency |
+| **Gap Detection** | ✅ Done | Intraday (`1m`/`5m`/`15m`/`1h`): detects missing timestamps per timeframe. Daily (`1d`): skipped — no exchange calendar configured; weekends/holidays not treated as gaps. |
 | **Duplicate Detection** | ✅ Done | Detects duplicate timestamps in returned data |
 | **Write-Through Cache** | ✅ Done | `_upsert_market_bars()` upserts to `MarketBar` table on every successful fetch |
 | **Data Quality Metadata** | ✅ Done | Response includes `data_quality` with issues, gaps, duplicates, bar_count, cached, cache_age_seconds |

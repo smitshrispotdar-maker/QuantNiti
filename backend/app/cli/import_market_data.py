@@ -250,15 +250,21 @@ class CSVImporter:
         # Detect gaps
         gaps, duplicates = [], []
         if len(df) >= 2:
-            expected_freq = FREQ.get(self.timeframe)
-            if expected_freq:
-                try:
-                    expected_range = pd.date_range(start=df.index[0], end=df.index[-1], freq=expected_freq)
-                    missing = expected_range.difference(df.index)
-                    if len(missing) > 0:
-                        gaps.append(f"{len(missing)} missing bar(s) detected (expected {len(expected_range)}, got {len(df)})")
-                except Exception:
-                    pass
+            # For daily timeframe (1d), skip gap detection because we lack an exchange trading calendar.
+            # Without a proper exchange calendar, we cannot distinguish weekends/holidays from actual gaps.
+            # For intraday timeframes (1m, 5m, 15m, 1h), gap detection uses calendar frequency.
+            if self.timeframe == "1d":
+                gaps.append("Daily gap detection skipped: no exchange trading calendar configured; weekends/holidays not excluded")
+            else:
+                expected_freq = FREQ.get(self.timeframe)
+                if expected_freq:
+                    try:
+                        expected_range = pd.date_range(start=df.index[0], end=df.index[-1], freq=expected_freq)
+                        missing = expected_range.difference(df.index)
+                        if len(missing) > 0:
+                            gaps.append(f"{len(missing)} missing bar(s) detected (expected {len(expected_range)}, got {len(df)})")
+                    except Exception:
+                        pass
         
         # Check for remaining duplicates after deduplication
         remaining_dups = int(df.index.duplicated(keep=False).sum())

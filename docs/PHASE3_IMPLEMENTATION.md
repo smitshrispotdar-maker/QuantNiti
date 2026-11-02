@@ -36,7 +36,7 @@ Phase 3A and 3B **fully completed**. Phase 3C-3E are planned but not yet impleme
 | **Timestamp Parsing** | ✅ | ISO 8601 with/without timezone, date-only, Z suffix |
 | **Validation** | ✅ | OHLC consistency, positive prices, finite values, non-negative volume |
 | **Duplicate Detection** | ✅ | Detects and removes duplicate timestamps (keeps first) |
-| **Gap Detection** | ✅ | Detects missing timestamps per timeframe frequency |
+| **Gap Detection** | ✅ | Intraday (`1m`/`5m`/`15m`/`1h`): detects missing timestamps. Daily (`1d`): skipped — no exchange calendar; weekends/holidays not flagged as gaps. |
 | **Dry-Run Mode** | ✅ | Validates without database connection |
 | **Database Import** | ✅ | Transaction-safe upsert with conflict handling (skip/update) |
 | **Import Summary** | ✅ | Detailed report with counts and validation issues |

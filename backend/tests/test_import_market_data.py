@@ -276,7 +276,8 @@ class TestProcessCSV:
             assert len(df) == 2
             assert stats["valid"] == 2
             assert stats["rejected"] == 0
-            assert len(errors) == 0
+            assert len(errors) == 1
+            assert "Daily gap detection skipped" in errors[0]
             assert "open" in df.columns
             assert "high" in df.columns
             assert "low" in df.columns
@@ -330,21 +331,22 @@ class TestProcessCSV:
             os.unlink(fname)
     
     def test_process_csv_gap_detection(self):
-        """Test gap detection in time series."""
+        """Test gap detection in time series for intraday timeframes."""
+        # Use 1h timeframe to test gap detection (daily skips gap detection)
         content = """timestamp,open,high,low,close,volume
 2026-01-05T09:15:00+05:30,24000,24100,23950,24080,120000
-2026-01-07T09:15:00+05:30,24150,24300,24100,24250,130000"""  # Missing 2026-01-06
+2026-01-05T11:15:00+05:30,24150,24300,24100,24250,130000"""  # Missing 10:15 bar
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             f.write(content)
             f.flush()
             fname = f.name
         
         try:
-            importer = CSVImporter("^NSEI", "1d", dry_run=True)
+            importer = CSVImporter("^NSEI", "1h", dry_run=True)
             df, errors, stats = importer.process_csv(fname)
             
             assert len(df) == 2
-            # Gap should be detected
+            # Gap should be detected for intraday timeframe
             gap_errors = [e for e in errors if "missing" in e.lower()]
             assert len(gap_errors) > 0
         finally:

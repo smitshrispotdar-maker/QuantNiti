@@ -74,8 +74,9 @@ Invalid rows are rejected and counted in the summary.
 - Reports count of duplicates removed
 
 ### Gap Detection
-- Detects missing timestamps based on timeframe frequency
-- Reports count of missing bars
+
+- **Intraday timeframes** (`1m`, `5m`, `15m`, `1h`): Detects missing timestamps based on timeframe frequency. Reports count of missing bars.
+- **Daily timeframe** (`1d`): Gap detection is **skipped** because no exchange trading calendar is configured. Without a proper exchange calendar, weekends and exchange holidays cannot be distinguished from actual missing trading bars. The output will include a warning: `"Daily gap detection skipped: no exchange trading calendar configured; weekends/holidays not excluded"`.
 
 ### OHLC Validation
 - Auto-fixes minor OHLC inconsistencies (reports as warnings)

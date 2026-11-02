@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { api, fmt, pnlColor, Badge } from "../api.jsx";
+import { api, watchlistApi, fmt, pnlColor, Badge, ErrorBox } from "../api.jsx";
 const Candle = ({ x, y, width, height, payload }) => {   // custom candlestick: bar spans [low, high]; body drawn proportionally
   const { open, close, high, low } = payload; const up = close >= open, col = up ? "#00C853" : "#FF5252";
   const k = height / (high - low || 1), yo = y + (high - Math.max(open, close)) * k, hb = Math.max(1, Math.abs(close - open) * k);
@@ -149,17 +149,49 @@ export function DataQualityPanel({ meta }) {
 export default function Dashboard() {
   const [wl, setWl] = useState([]); const [sym, setSym] = useState("BTC-USD"); const [tf, setTf] = useState("1d");
   const [d, setD] = useState(null); const [ov, setOv] = useState({ ema20: true, sma20: false, bb: false }); const [sub, setSub] = useState("rsi");
-  const [q, setQ] = useState(""); const [res, setRes] = useState(null);
-  useEffect(() => { api("/api/market/watchlist").then(setWl).catch(() => {}); }, []);
+  const [res, setRes] = useState(null);
+  const [addSymbol, setAddSymbol] = useState(""); const [addError, setAddError] = useState("");
+  
+  useEffect(() => { watchlistApi.get().then(setWl).catch(() => {}); }, []);
   useEffect(() => { setD(null); api(`/api/market/bars/${sym}?timeframe=${tf}&limit=120`).then(setD).catch(() => {}); api(`/api/market/research/${sym}?timeframe=${tf}`).then(setRes).catch(() => {}); }, [sym, tf]);
+  
+  const handleAddSymbol = async () => {
+    if (!addSymbol.trim()) return;
+    setAddError("");
+    try {
+      await watchlistApi.add(addSymbol.trim().toUpperCase());
+      setAddSymbol("");
+      setWl(await watchlistApi.get());
+    } catch (e) {
+      setAddError(e.detail || "Failed to add symbol");
+    }
+  };
+  
+  const handleRemoveSymbol = async (symbol) => {
+    try {
+      await watchlistApi.remove(symbol);
+      setWl(await watchlistApi.get());
+    } catch (e) {
+      setAddError(e.detail || "Failed to remove symbol");
+    }
+  };
   const bars = d?.bars.map((b) => ({ ...b, range: [b.low, b.high], t: b.ts.slice(5, 16) })) || [];
   return (
     <div className="grid grid-cols-12 gap-3">
       <div className="card col-span-3 p-2">
-        <input className="w-full bg-ink border border-line rounded px-2 py-1 text-sm mb-2" placeholder="Search instrument" value={q}
-          onChange={(e) => { setQ(e.target.value); e.target.value && api(`/api/market/search?q=${e.target.value}`).then((r) => r[0] && setSym(r[0])); }} />
+        <div className="flex gap-2 mb-2">
+          <input className="flex-1 bg-ink border border-line rounded px-2 py-1 text-sm" placeholder="Add symbol (e.g., AAPL)" value={addSymbol}
+            onChange={(e) => { setAddSymbol(e.target.value); setAddError(""); }}
+            onKeyDown={(e) => e.key === "Enter" && handleAddSymbol()} />
+          <button className="btn btn-ai" onClick={handleAddSymbol} disabled={!addSymbol.trim()}>Add</button>
+        </div>
+        {addError && <p className="text-down text-xs mb-2">{addError}</p>}
         {wl.map((w) => (<button key={w.symbol} onClick={() => setSym(w.symbol)} className={`w-full flex justify-between px-2 py-1.5 text-sm rounded ${sym === w.symbol ? "bg-line" : ""}`}>
-          <span>{w.symbol}</span><span className="num">{fmt(w.price)} <span className={pnlColor(w.change_pct)}>{fmt(w.change_pct)}%</span></span></button>))}
+          <span>{w.symbol}</span>
+          <span className="flex items-center gap-1">
+            <span className="num">{fmt(w.price)} <span className={pnlColor(w.change_pct)}>{fmt(w.change_pct)}%</span></span>
+            <button onClick={(e) => { e.stopPropagation(); handleRemoveSymbol(w.symbol); }} className="text-slate-400 hover:text-down p-1" title="Remove">✕</button>
+          </span></button>))}
       </div>
       <div className="card col-span-9 p-3">
         <div className="flex items-center gap-2 mb-2 text-sm">

@@ -1,4 +1,5 @@
 """Canonical Strategy Schema v1.0 — the single contract shared by chat studio, visual builder, backtester and paper engine."""
+from datetime import datetime
 from typing import Literal, Union, Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
@@ -126,3 +127,21 @@ class JournalIn(BaseModel):
 
 class ReviewIn(BaseModel):
     outcome_review: str
+
+
+class WatchlistAdd(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+
+
+class WatchlistItemResponse(BaseModel):
+    id: int
+    symbol: str
+    name: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class WatchlistResponse(BaseModel):
+    items: List[WatchlistItemResponse]
