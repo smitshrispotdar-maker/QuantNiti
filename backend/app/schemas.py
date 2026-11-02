@@ -106,7 +106,11 @@ class StrategyIn(BaseModel):
 class BacktestIn(BaseModel):
     strategy_id: int
     bars: int = 500
-    initial_cash: float = 100_000
+    initial_cash: float = Field(default=100_000, gt=0)
+    transaction_cost_bps: float = Field(default=0, ge=0, le=1000)
+    slippage_bps: float = Field(default=0, ge=0, le=1000)
+    start_date: Optional[str] = None  # ISO format
+    end_date: Optional[str] = None    # ISO format
 
 class OrderIn(BaseModel):
     symbol: str

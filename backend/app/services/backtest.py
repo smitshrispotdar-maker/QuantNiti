@@ -16,22 +16,30 @@ def signals(df, spec: StrategySpec):
     entry = pd.concat([eval_rule(df, r) for r in spec.entry_rules], axis=1).all(axis=1) if spec.entry_rules else full
     exit_ = pd.concat([eval_rule(df, r) for r in spec.exit_rules], axis=1).any(axis=1) if spec.exit_rules else full
     return entry.fillna(False), exit_.fillna(False)
-def run(spec: StrategySpec, bars: pd.DataFrame, initial_cash=100_000.0):
+def run(spec: StrategySpec, bars: pd.DataFrame, initial_cash=100_000.0, transaction_cost_bps=0.0, slippage_bps=0.0):
     df = compute(bars, spec.indicators); entry, exit_ = signals(df, spec); r = spec.risk
     cash, qty, entry_px, trades, eq = initial_cash, 0.0, 0.0, [], []
     in_bars = 0
     for i in range(len(df) - 1):
         row, nxt = df.iloc[i], df.iloc[i + 1]; px = nxt.open
+        # Apply slippage: buy at higher price, sell at lower price
+        buy_px = px * (1 + slippage_bps / 10000)
+        sell_px = px * (1 - slippage_bps / 10000)
         if qty > 0:
             reason = None
             if exit_.iloc[i]: reason = "exit_rule"
             elif r.stop_loss_pct and row.close <= entry_px * (1 - r.stop_loss_pct / 100): reason = "stop_loss"
             elif r.take_profit_pct and row.close >= entry_px * (1 + r.take_profit_pct / 100): reason = "take_profit"
             if reason:
-                cash += qty * px; trades.append({"entry": entry_px, "exit": px, "pnl": qty * (px - entry_px), "ret": px / entry_px - 1, "reason": reason, "ts": str(df.index[i + 1])})
+                # Apply transaction cost on sell
+                sell_px_net = sell_px * (1 - transaction_cost_bps / 10000)
+                cash += qty * sell_px_net
+                trades.append({"entry": entry_px, "exit": px, "pnl": qty * (sell_px_net - entry_px), "ret": sell_px_net / entry_px - 1, "reason": reason, "ts": str(df.index[i + 1])})
                 qty = 0.0
         elif entry.iloc[i] and not math.isnan(px):
-            qty = (cash * r.max_position_pct / 100) / px; cash -= qty * px; entry_px = px
+            # Apply transaction cost on buy
+            buy_px_net = buy_px * (1 + transaction_cost_bps / 10000)
+            qty = (cash * r.max_position_pct / 100) / buy_px_net; cash -= qty * buy_px_net; entry_px = buy_px_net
         if qty > 0: in_bars += 1
         eq.append(cash + qty * row.close)
     eq.append(cash + qty * df.close.iloc[-1])

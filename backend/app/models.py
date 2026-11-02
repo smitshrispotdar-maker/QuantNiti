@@ -22,6 +22,15 @@ class MarketBar(Base):
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
     id = Column(Integer, primary_key=True); strategy_id = Column(Integer, ForeignKey("strategies.id")); strategy_version = Column(Integer)
+    # Strategy spec snapshot for immutability
+    strategy_spec = Column(JSONB)
+    # Backtest configuration
+    initial_cash = Column(Float, default=100_000)
+    transaction_cost_bps = Column(Float, default=0)
+    slippage_bps = Column(Float, default=0)
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    # Results
     metrics = Column(JSONB); equity_curve = Column(JSONB); trades = Column(JSONB); validation = Column(JSONB); data_source = Column(String); created_at = Column(DateTime, default=now)
 class PaperAccount(Base):
     __tablename__ = "paper_accounts"
