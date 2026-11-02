@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import Strategy, Conversation
+from ..models import Strategy, Conversation, ResearchRun
 from ..schemas import StrategyIn, StrategySpec, ChatIn
 from ..services import nlp, backtest, market, validation, paper
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])

@@ -1,6 +1,7 @@
 import pandas as pd
 from fastapi import APIRouter, Query, Depends
 from sqlalchemy.orm import Session
+from typing import List
 from ..db import get_db
 from ..services import market as m, indicators as ind, research
 from ..schemas import MarketBarsResponse, WatchlistItem, SymbolInfo, MarketMeta, MarketBarRow

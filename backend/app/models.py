@@ -113,8 +113,59 @@ class PaperTrade(Base):
     slippage = Column(Float, default=0.0)
 class JournalEntry(Base):
     __tablename__ = "journal"
-    id = Column(Integer, primary_key=True); strategy_id = Column(Integer, nullable=True); strategy_version = Column(Integer, nullable=True)
-    recommendation = Column(Text); evidence = Column(JSONB); outcome_review = Column(Text, nullable=True); created_at = Column(DateTime, default=now)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Decision classification
+    decision_type = Column(String, nullable=False, default="general_note")  # strategy_hypothesis, research_finding, backtest_review, risk_review, strategy_approval, strategy_rejection, strategy_modification, paper_trading_review, general_note
+    status = Column(String, nullable=False, default="draft")  # draft, under_review, approved, rejected, superseded, completed
+    title = Column(String, nullable=False)
+    # Relationships
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=True)
+    strategy_version = Column(Integer, nullable=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)
+    backtest_run_id = Column(Integer, ForeignKey("backtest_runs.id"), nullable=True)
+    research_run_id = Column(Integer, ForeignKey("research_runs.id"), nullable=True)
+    deployment_id = Column(Integer, ForeignKey("paper_deployments.id"), nullable=True)
+    # Content
+    hypothesis_rationale = Column(Text, nullable=True)
+    evidence_summary = Column(Text, nullable=True)
+    risks_assumptions = Column(Text, nullable=True)
+    decision_next_steps = Column(Text, nullable=True)
+    expected_outcome = Column(Text, nullable=True)
+    actual_outcome = Column(Text, nullable=True)
+    # Legacy fields (kept for compatibility)
+    recommendation = Column(Text, nullable=True)
+    evidence = Column(JSONB, nullable=True)
+    outcome_review = Column(Text, nullable=True)
+    # Timestamps
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
+class ResearchRun(Base):
+    __tablename__ = "research_runs"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Relationships
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=True)
+    strategy_version = Column(Integer, nullable=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)
+    backtest_run_id = Column(Integer, ForeignKey("backtest_runs.id"), nullable=True)
+    deployment_id = Column(Integer, ForeignKey("paper_deployments.id"), nullable=True)
+    # Context
+    strategy_spec_snapshot = Column(JSONB, nullable=True)
+    backtest_metrics_snapshot = Column(JSONB, nullable=True)
+    # Results
+    facts = Column(JSONB, nullable=True)
+    interpretations = Column(JSONB, nullable=True)
+    label = Column(String, nullable=True)
+    # Provenance
+    data_source = Column(String, nullable=True)
+    data_quality = Column(JSONB, nullable=True)
+    is_simulated = Column(Boolean, default=False)
+    # Timestamps
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
 
 class WatchlistItem(Base):
     __tablename__ = "watchlist_items"

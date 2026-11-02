@@ -1,9 +1,11 @@
 import React, { useState } from "react";
-import { LineChart as Chart, MessageSquare, Workflow, FlaskConical, Wallet, BookOpen, PanelLeft } from "lucide-react";
+import { LineChart as Chart, MessageSquare, Workflow, FlaskConical, Wallet, BookOpen, PanelLeft, Microscope } from "lucide-react";
 import Dashboard from "./pages/Dashboard.jsx"; import Studio from "./pages/Studio.jsx"; import Builder from "./pages/Builder.jsx";
 import Backtest from "./pages/Backtest.jsx"; import Paper from "./pages/Paper.jsx"; import Journal from "./pages/Journal.jsx";
+import Research from "./pages/Research.jsx";
 const NAV = [["dash", "Market", Chart, Dashboard], ["studio", "AI Studio", MessageSquare, Studio], ["builder", "Builder", Workflow, Builder],
-  ["bt", "Backtest", FlaskConical, Backtest], ["paper", "Paper trading", Wallet, Paper], ["journal", "Journal", BookOpen, Journal]];
+  ["bt", "Backtest", FlaskConical, Backtest], ["paper", "Paper trading", Wallet, Paper], ["journal", "Journal", BookOpen, Journal],
+  ["research", "Research", Microscope, Research]];
 export default function App() {
   const [tab, setTab] = useState("dash"); const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState(null);       // shared canonical StrategySpec (chat ⇄ builder ⇄ backtest)

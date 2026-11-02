@@ -133,6 +133,133 @@ class ReviewIn(BaseModel):
     outcome_review: str
 
 
+# Journal Schemas
+DECISION_TYPES = (
+    "strategy_hypothesis", "research_finding", "backtest_review", "risk_review",
+    "strategy_approval", "strategy_rejection", "strategy_modification",
+    "paper_trading_review", "general_note"
+)
+
+JOURNAL_STATUSES = ("draft", "under_review", "approved", "rejected", "superseded", "completed")
+
+
+class JournalIn(BaseModel):
+    strategy_id: Optional[int] = None
+    recommendation: str
+    evidence: dict = {}
+
+
+class JournalEntryCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    decision_type: Literal[DECISION_TYPES] = "general_note"
+    status: Literal[JOURNAL_STATUSES] = "draft"
+    strategy_id: Optional[int] = None
+    strategy_version: Optional[int] = None
+    conversation_id: Optional[int] = None
+    backtest_run_id: Optional[int] = None
+    research_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
+    hypothesis_rationale: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    risks_assumptions: Optional[str] = None
+    decision_next_steps: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    actual_outcome: Optional[str] = None
+    recommendation: Optional[str] = None
+    evidence: Optional[dict] = None
+
+
+class JournalEntryUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    decision_type: Optional[Literal[DECISION_TYPES]] = None
+    status: Optional[Literal[JOURNAL_STATUSES]] = None
+    hypothesis_rationale: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    risks_assumptions: Optional[str] = None
+    decision_next_steps: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    actual_outcome: Optional[str] = None
+    recommendation: Optional[str] = None
+    evidence: Optional[dict] = None
+    outcome_review: Optional[str] = None
+
+
+class JournalEntryResponse(BaseModel):
+    id: int
+    user_id: int
+    title: str
+    decision_type: str
+    status: str
+    strategy_id: Optional[int] = None
+    strategy_version: Optional[int] = None
+    conversation_id: Optional[int] = None
+    backtest_run_id: Optional[int] = None
+    research_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
+    hypothesis_rationale: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    risks_assumptions: Optional[str] = None
+    decision_next_steps: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    actual_outcome: Optional[str] = None
+    recommendation: Optional[str] = None
+    evidence: Optional[dict] = None
+    outcome_review: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class JournalEntryListResponse(BaseModel):
+    items: List[JournalEntryResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+# Research Run Schemas
+class ResearchRunCreate(BaseModel):
+    strategy_id: Optional[int] = None
+    strategy_version: Optional[int] = None
+    conversation_id: Optional[int] = None
+    backtest_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
+    strategy_spec_snapshot: Optional[dict] = None
+    backtest_metrics_snapshot: Optional[dict] = None
+
+
+class ResearchRunResponse(BaseModel):
+    id: int
+    user_id: int
+    strategy_id: Optional[int] = None
+    strategy_version: Optional[int] = None
+    conversation_id: Optional[int] = None
+    backtest_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
+    strategy_spec_snapshot: Optional[dict] = None
+    backtest_metrics_snapshot: Optional[dict] = None
+    facts: Optional[dict] = None
+    interpretations: Optional[dict] = None
+    label: Optional[str] = None
+    data_source: Optional[str] = None
+    data_quality: Optional[dict] = None
+    is_simulated: bool = False
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class ResearchRunListResponse(BaseModel):
+    items: List[ResearchRunResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 class WatchlistAdd(BaseModel):
     symbol: str = Field(min_length=1, max_length=20)
 
