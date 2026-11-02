@@ -3,6 +3,7 @@ import math
 import numpy as np, pandas as pd
 from ..schemas import StrategySpec, Rule
 from .indicators import compute
+from . import market
 def _side(df, x):
     return df[x] if isinstance(x, str) else pd.Series(float(x), index=df.index)
 def eval_rule(df, r: Rule) -> pd.Series:
@@ -55,3 +56,7 @@ def run(spec: StrategySpec, bars: pd.DataFrame, initial_cash=100_000.0, transact
                "exposure_pct": round(in_bars / len(df) * 100, 1), "trades": len(trades)}
     curve = [{"ts": str(k), "equity": round(v, 2), "drawdown": round((v / s[:k].max() - 1) * 100, 2)} for k, v in s.items()]
     return metrics, curve, trades
+
+def compute_market_data(symbol: str, timeframe: str, bars: int, db) -> tuple:
+    """Fetch market data for paper trading execution. Returns (df, meta)."""
+    return market.get_bars(symbol, timeframe, bars, db)

@@ -1,16 +1,24 @@
-"""Paper engine. NO broker integration exists anywhere; fills are simulated at the latest bar close."""
-from fastapi import APIRouter, Depends, HTTPException
+"""Paper trading engine with simulated execution matching backtest model."""
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import PaperAccount, PaperOrder, Strategy, BacktestRun
+from ..models import PaperAccount, PaperOrder, PaperDeployment, PaperPosition, Strategy, BacktestRun
 from ..schemas import AccountIn, OrderIn, DeployIn, StrategySpec
-from ..services import market, backtest, validation
+from ..services import market, backtest, validation, paper
 router = APIRouter(prefix="/api/paper", tags=["paper"])
-def _acct(db, aid):
+
+def _acct(db: Session, aid: int) -> PaperAccount:
     a = db.get(PaperAccount, aid)
     if not a: raise HTTPException(404, "Account not found")
     return a
-def _state(db, a):
+
+def _deployment(db: Session, did: int) -> PaperDeployment:
+    d = db.get(PaperDeployment, did)
+    if not d: raise HTTPException(404, "Deployment not found")
+    return d
+
+def _legacy_state(db: Session, a: PaperAccount) -> dict:
+    """Legacy state computation for backwards compatibility with manual accounts."""
     pos = {}
     for o in db.query(PaperOrder).filter_by(account_id=a.id).order_by(PaperOrder.id):
         p = pos.setdefault(o.symbol, {"qty": 0.0, "cost": 0.0, "realized": 0.0}); sgn = 1 if o.side == "BUY" else -1
@@ -26,7 +34,13 @@ def _state(db, a):
         out.append({"symbol": sym, "qty": round(p["qty"], 6), "avg_price": round(avg, 2), "last": round(px, 2), "unrealized": round(p["qty"] * (px - avg), 2), "realized": round(p["realized"], 2)})
     return {"id": a.id, "name": a.name, "status": a.status, "cash": round(a.cash, 2), "equity": round(eq, 2), "starting_cash": a.starting_cash,
             "pnl": round(eq - a.starting_cash, 2), "positions": out, "strategy_id": a.strategy_id, "label": "PAPER/SIMULATED"}
-def _fill(db, a, symbol, side, qty, reason):
+
+# Alias for backwards compatibility with tests
+_state = _legacy_state
+
+# --- Backwards compatibility functions for tests ---
+def _fill(db: Session, a: PaperAccount, symbol: str, side: str, qty: float, reason: str) -> PaperOrder:
+    """Legacy fill function for test compatibility."""
     if a.status != "RUNNING": raise HTTPException(409, f"Account is {a.status}; orders blocked.")
     px = float(market.get_bars(symbol, "1d", 60)[0].close.iloc[-1]); cost = qty * px
     if side == "BUY" and cost > a.cash: raise HTTPException(422, "Insufficient simulated cash.")
@@ -34,45 +48,258 @@ def _fill(db, a, symbol, side, qty, reason):
     if side == "SELL" and qty > held + 1e-9: raise HTTPException(422, "Cannot sell more than held (no shorting in MVP).")
     a.cash += -cost if side == "BUY" else cost
     o = PaperOrder(account_id=a.id, symbol=symbol, side=side, qty=qty, fill_price=px, reason=reason); db.add(o); db.commit(); return o
+
 @router.get("/accounts")
-def accounts(db: Session = Depends(get_db)): return [_state(db, a) for a in db.query(PaperAccount).order_by(PaperAccount.id)]
+def accounts(db: Session = Depends(get_db)):
+    """List all paper accounts with their state."""
+    results = []
+    for a in db.query(PaperAccount).order_by(PaperAccount.id):
+        if a.strategy_id:
+            # Has deployment - get deployment state
+            deployment = db.query(PaperDeployment).filter_by(account_id=a.id, status="ACTIVE").first()
+            if deployment:
+                results.append(paper.get_deployment_state(db, deployment))
+            else:
+                results.append(_legacy_state(db, a))
+        else:
+            results.append(_legacy_state(db, a))
+    return results
+
 @router.post("/accounts")
 def create(body: AccountIn, db: Session = Depends(get_db)):
-    a = PaperAccount(name=body.name, starting_cash=body.starting_cash, cash=body.starting_cash); db.add(a); db.commit(); db.refresh(a); return _state(db, a)
+    """Create a new paper trading account."""
+    a = PaperAccount(name=body.name, starting_cash=body.starting_cash, cash=body.starting_cash)
+    db.add(a); db.commit(); db.refresh(a)
+    return _legacy_state(db, a)
+
 @router.get("/accounts/{aid}")
 def get(aid: int, db: Session = Depends(get_db)):
-    a = _acct(db, aid); s = _state(db, a)
+    """Get account state (legacy or deployment)."""
+    a = _acct(db, aid)
+    if a.strategy_id:
+        deployment = db.query(PaperDeployment).filter_by(account_id=aid, status="ACTIVE").first()
+        if deployment:
+            return paper.get_deployment_state(db, deployment)
+    s = _legacy_state(db, a)
     s["orders"] = [{"id": o.id, "symbol": o.symbol, "side": o.side, "qty": o.qty, "fill_price": o.fill_price, "reason": o.reason, "ts": o.ts.isoformat(), "label": o.label}
                    for o in db.query(PaperOrder).filter_by(account_id=aid).order_by(PaperOrder.id.desc()).limit(50)]
     return s
+
 @router.post("/accounts/{aid}/orders")
 def order(aid: int, body: OrderIn, db: Session = Depends(get_db)):
-    o = _fill(db, _acct(db, aid), body.symbol.upper(), body.side, body.qty, "manual"); return {"order_id": o.id, "fill_price": o.fill_price, "label": o.label}
+    """Place a manual order (legacy endpoint for non-deployment accounts)."""
+    a = _acct(db, aid)
+    if a.status != "RUNNING": raise HTTPException(409, f"Account is {a.status}; orders blocked.")
+    px = float(market.get_bars(body.symbol.upper(), "1d", 60)[0].close.iloc[-1]); cost = body.qty * px
+    if body.side == "BUY" and cost > a.cash: raise HTTPException(422, "Insufficient simulated cash.")
+    held = sum((o.qty if o.side == "BUY" else -o.qty) for o in db.query(PaperOrder).filter_by(account_id=a.id, symbol=body.symbol.upper()))
+    if body.side == "SELL" and body.qty > held + 1e-9: raise HTTPException(422, "Cannot sell more than held (no shorting in MVP).")
+    a.cash += -cost if body.side == "BUY" else cost
+    o = PaperOrder(account_id=a.id, symbol=body.symbol.upper(), side=body.side, qty=body.qty, fill_price=px, reason="manual")
+    db.add(o); db.commit()
+    return {"order_id": o.id, "fill_price": o.fill_price, "label": o.label}
+
 @router.post("/accounts/{aid}/control/{action}")
 def control(aid: int, action: str, db: Session = Depends(get_db)):
-    a = _acct(db, aid); m = {"pause": "PAUSED", "resume": "RUNNING", "stop": "STOPPED", "kill": "KILLED"}
+    """Control account status (pause/resume/stop/kill)."""
+    a = _acct(db, aid)
+    m = {"pause": "PAUSED", "resume": "RUNNING", "stop": "STOPPED", "kill": "KILLED"}
     if action not in m: raise HTTPException(400, "Unknown action")
     if a.status == "KILLED" and action != "kill": raise HTTPException(409, "Kill switch engaged; create a new account.")
-    a.status = m[action]; db.commit(); return _state(db, a)
+    a.status = m[action]; db.commit()
+    return _legacy_state(db, a)
+
+# --- Legacy API for backwards compatibility ---
+
 @router.post("/accounts/{aid}/deploy")
 def deploy(aid: int, body: DeployIn, db: Session = Depends(get_db)):
-    """Gate: strategy must have a latest backtest that passes validation."""
-    a = _acct(db, aid); s = db.get(Strategy, body.strategy_id)
-    if not s: raise HTTPException(404, "Strategy not found")
-    run = db.query(BacktestRun).filter_by(strategy_id=s.id, strategy_version=s.version).order_by(BacktestRun.id.desc()).first()
-    gate = validation.validate(StrategySpec(**s.spec), run.metrics if run else None)
-    if not gate["passed"]: raise HTTPException(422, {"validation": gate})
-    a.strategy_id = s.id; db.commit(); return _state(db, a)
+    """Legacy deploy endpoint - creates deployment and returns account state."""
+    # This maintains the old API: deploy to account, not deployment ID
+    result = create_deployment(aid, body, db)
+    # Return legacy state for backwards compatibility
+    a = _acct(db, aid)
+    return _legacy_state(db, a)
+
 @router.post("/accounts/{aid}/step")
 def step(aid: int, db: Session = Depends(get_db)):
-    """Evaluate the deployed strategy on the latest closed bar and place a simulated order if the signal fires."""
+    """Legacy step endpoint - evaluates strategy on account's deployed strategy."""
     a = _acct(db, aid)
-    if not a.strategy_id: raise HTTPException(409, "No strategy deployed.")
-    spec = StrategySpec(**db.get(Strategy, a.strategy_id).spec); sym = spec.instruments[0]
-    df, _ = market.get_bars(sym, spec.timeframe, 300); e, x = backtest.signals(backtest.compute(df, spec.indicators), spec)
-    held = sum((o.qty if o.side == "BUY" else -o.qty) for o in db.query(PaperOrder).filter_by(account_id=a.id, symbol=sym))
-    if e.iloc[-1] and held < 1e-9:
-        _fill(db, a, sym, "BUY", round(a.cash * spec.risk.max_position_pct / 100 / float(df.close.iloc[-1]), 6), "strategy_entry"); return {"action": "BUY"}
-    if x.iloc[-1] and held > 1e-9:
-        _fill(db, a, sym, "SELL", held, "strategy_exit"); return {"action": "SELL"}
-    return {"action": "HOLD"}
+    if not a.strategy_id:
+        raise HTTPException(409, "No strategy deployed.")
+    
+    # Find active deployment for this account
+    deployment = db.query(PaperDeployment).filter_by(account_id=aid, status="ACTIVE").first()
+    if not deployment:
+        raise HTTPException(409, "No active deployment found.")
+    
+    try:
+        result = paper.evaluate_strategy_step(db, deployment, force=False)
+        return result
+    except paper.PaperExecutionError as e:
+        raise HTTPException(422 if e.code != "DEPLOYMENT_NOT_ACTIVE" and e.code != "ACCOUNT_NOT_RUNNING" else 409,
+                           {"error": e.code, "message": e.message})
+
+# --- Deployment Endpoints ---
+
+@router.post("/accounts/{aid}/deployments")
+def create_deployment(aid: int, body: DeployIn, db: Session = Depends(get_db)):
+    """
+    Create a new paper trading deployment from a validated strategy.
+    
+    Requirements:
+    - Strategy must exist
+    - Strategy must have a passing backtest (same version)
+    - Account must be RUNNING
+    - Account must not have an active deployment
+    """
+    a = _acct(db, aid)
+    if a.status != "RUNNING":
+        raise HTTPException(409, f"Account is {a.status}; cannot deploy.")
+    
+    # Check for existing active deployment
+    existing = db.query(PaperDeployment).filter_by(account_id=aid, status="ACTIVE").first()
+    if existing:
+        raise HTTPException(409, "Account already has an active deployment. Close it first.")
+    
+    s = db.get(Strategy, body.strategy_id)
+    if not s:
+        raise HTTPException(404, "Strategy not found")
+    
+    # Get latest backtest for this strategy version
+    run = db.query(BacktestRun).filter_by(strategy_id=s.id, strategy_version=s.version).order_by(BacktestRun.id.desc()).first()
+    if not run:
+        raise HTTPException(422, {"validation": {"passed": False, "errors": ["No backtest found for this strategy version"], "warnings": []}})
+    
+    # Validate strategy with backtest metrics
+    gate = validation.validate(StrategySpec(**s.spec), run.metrics)
+    if not gate["passed"]:
+        raise HTTPException(422, {"validation": gate})
+    
+    # Create deployment with immutable snapshot
+    deployment = PaperDeployment(
+        account_id=a.id,
+        strategy_id=s.id,
+        strategy_version=s.version,
+        strategy_spec=s.spec,
+        initial_cash=a.cash,  # Use current account cash as starting capital
+        transaction_cost_bps=run.transaction_cost_bps,
+        slippage_bps=run.slippage_bps,
+        max_position_pct=StrategySpec(**s.spec).risk.max_position_pct,
+        stop_loss_pct=StrategySpec(**s.spec).risk.stop_loss_pct,
+        take_profit_pct=StrategySpec(**s.spec).risk.take_profit_pct,
+        max_drawdown_pct=StrategySpec(**s.spec).risk.max_drawdown_pct,
+        data_source=run.data_source,
+        status="ACTIVE",
+    )
+    db.add(deployment)
+    db.commit()
+    db.refresh(deployment)
+    
+    # Update account strategy_id for legacy compatibility
+    a.strategy_id = s.id
+    db.commit()
+    
+    return paper.get_deployment_state(db, deployment)
+
+@router.get("/deployments/{did}")
+def get_deployment(did: int, db: Session = Depends(get_db)):
+    """Get deployment state with positions, orders, trades, metrics."""
+    deployment = _deployment(db, did)
+    return paper.get_deployment_state(db, deployment)
+
+@router.get("/accounts/{aid}/deployments")
+def list_deployments(aid: int, db: Session = Depends(get_db)):
+    """List all deployments for an account."""
+    _acct(db, aid)  # Verify account exists
+    deployments = db.query(PaperDeployment).filter_by(account_id=aid).order_by(PaperDeployment.id.desc()).all()
+    return [{
+        "id": d.id,
+        "strategy_id": d.strategy_id,
+        "strategy_version": d.strategy_version,
+        "status": d.status,
+        "activated_at": d.activated_at.isoformat() if d.activated_at else None,
+        "closed_at": d.closed_at.isoformat() if d.closed_at else None,
+        "initial_cash": d.initial_cash,
+        "transaction_cost_bps": d.transaction_cost_bps,
+        "slippage_bps": d.slippage_bps,
+        "max_position_pct": d.max_position_pct,
+        "stop_loss_pct": d.stop_loss_pct,
+        "take_profit_pct": d.take_profit_pct,
+    } for d in deployments]
+
+@router.post("/deployments/{did}/step")
+def step_deployment(did: int, force: bool = Query(False), db: Session = Depends(get_db)):
+    """
+    Evaluate deployed strategy on latest market data and execute signals.
+    
+    Matches backtest execution model:
+    - Signals evaluated on CLOSED bars (no look-ahead)
+    - Orders fill at NEXT bar OPEN
+    - Slippage and transaction costs applied
+    - Stop loss / take profit checked intra-bar
+    """
+    deployment = _deployment(db, did)
+    try:
+        result = paper.evaluate_strategy_step(db, deployment, force=force)
+        return result
+    except paper.PaperExecutionError as e:
+        raise HTTPException(422 if e.code != "DEPLOYMENT_NOT_ACTIVE" and e.code != "ACCOUNT_NOT_RUNNING" else 409, 
+                           {"error": e.code, "message": e.message})
+
+@router.post("/deployments/{did}/control/{action}")
+def control_deployment(did: int, action: str, db: Session = Depends(get_db)):
+    """Control deployment status (pause/resume/stop/close)."""
+    deployment = _deployment(db, did)
+    valid_actions = {"pause": "PAUSED", "resume": "ACTIVE", "stop": "STOPPED", "close": "CLOSED"}
+    if action not in valid_actions:
+        raise HTTPException(400, "Unknown action. Use: pause, resume, stop, close")
+    
+    if action == "close":
+        # Liquidate positions and close
+        paper.close_deployment(db, did)
+    else:
+        if deployment.status == "CLOSED":
+            raise HTTPException(409, "Cannot modify closed deployment.")
+        deployment.status = valid_actions[action]
+        db.commit()
+    
+    return paper.get_deployment_state(db, deployment)
+
+@router.post("/deployments/{did}/orders")
+def place_deployment_order(did: int, body: OrderIn, db: Session = Depends(get_db)):
+    """Place a manual order within a deployment."""
+    deployment = _deployment(db, did)
+    if deployment.status != "ACTIVE":
+        raise HTTPException(409, f"Deployment is {deployment.status}; orders blocked.")
+    
+    try:
+        order = paper.place_manual_order(db, did, body.symbol.upper(), body.side, body.qty, "manual")
+        return paper.get_deployment_state(db, deployment)
+    except paper.PaperExecutionError as e:
+        raise HTTPException(422 if e.code != "DEPLOYMENT_NOT_ACTIVE" and e.code != "ACCOUNT_NOT_RUNNING" else 409,
+                           {"error": e.code, "message": e.message})
+
+@router.get("/deployments/{did}/trades")
+def get_deployment_trades(did: int, db: Session = Depends(get_db)):
+    """Get all completed trades for a deployment."""
+    _deployment(db, did)
+    from ..models import PaperTrade
+    trades = db.query(PaperTrade).filter_by(deployment_id=did).order_by(PaperTrade.entry_ts).all()
+    return [{
+        "id": t.id,
+        "symbol": t.symbol,
+        "side": t.side,
+        "qty": t.qty,
+        "entry_price": t.entry_price,
+        "exit_price": t.exit_price,
+        "entry_ts": t.entry_ts.isoformat() if t.entry_ts else None,
+        "exit_ts": t.exit_ts.isoformat() if t.exit_ts else None,
+        "pnl": round(t.pnl, 2),
+        "ret": round(t.ret * 100, 2),
+        "reason": t.reason,
+        "fees": round(t.fees, 2),
+        "slippage": round(t.slippage, 2),
+    } for t in trades]
+
+# Aliases for backwards compatibility with tests
+deploy = create_deployment

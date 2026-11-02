@@ -296,6 +296,7 @@ class TestDeployValidation:
         account.id = 1
         account.status = "RUNNING"
         account.strategy_id = None
+        account.cash = 100_000
         
         strategy = MagicMock()
         strategy.id = 5
@@ -310,9 +311,15 @@ class TestDeployValidation:
             "risk": {"max_position_pct": 25, "stop_loss_pct": 5, "take_profit_pct": None, "max_drawdown_pct": 25},
         }
         
+        # Mock query that returns None for backtest, None for deployment
+        mock_query = MagicMock()
+        mock_query.filter_by.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.first.side_effect = [None, None]  # First for backtest, second for deployment
+        
         mock_db = MagicMock()
-        mock_db.get.return_value = strategy  # get Strategy
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = None  # No backtest run
+        mock_db.get.side_effect = [account, strategy]
+        mock_db.query.return_value = mock_query
         
         from app.routers.paper import deploy
         from fastapi import HTTPException
@@ -322,7 +329,11 @@ class TestDeployValidation:
             deploy(1, DeployIn(strategy_id=5), mock_db)
         
         assert exc_info.value.status_code == 422
-        assert "Run a backtest before deployment" in str(exc_info.value.detail)
+        # Error detail is a dict with validation error
+        detail = exc_info.value.detail
+        assert isinstance(detail, dict)
+        assert "validation" in detail
+        assert "No backtest found for this strategy version" in str(detail)
     
     def test_deploy_fails_validation(self):
         """Test deploy fails when backtest validation fails."""
@@ -330,6 +341,7 @@ class TestDeployValidation:
         account.id = 1
         account.status = "RUNNING"
         account.strategy_id = None
+        account.cash = 100_000
         
         strategy = MagicMock()
         strategy.id = 5
@@ -345,12 +357,29 @@ class TestDeployValidation:
         }
         
         # Mock backtest run with failing metrics (drawdown > limit)
+        from unittest.mock import PropertyMock
         mock_run = MagicMock()
-        mock_run.metrics = {"trades": 10, "max_drawdown_pct": 20}
+        type(mock_run).metrics = PropertyMock(return_value={"trades": 10, "max_drawdown_pct": 20})
+        type(mock_run).transaction_cost_bps = PropertyMock(return_value=0)
+        type(mock_run).slippage_bps = PropertyMock(return_value=0)
+        type(mock_run).data_source = PropertyMock(return_value="MOCK")
+        
+        # Create separate mock queries for deployment (first) and backtest (second) to match actual query order
+        from unittest.mock import PropertyMock
+        
+        mock_deployment_query = MagicMock()
+        mock_deployment_query.filter_by.return_value = mock_deployment_query
+        mock_deployment_query.first.return_value = None  # No active deployment
+        
+        mock_backtest_query = MagicMock()
+        mock_backtest_query.filter_by.return_value = mock_backtest_query
+        mock_backtest_query.order_by.return_value = mock_backtest_query
+        mock_backtest_query.first.return_value = mock_run
         
         mock_db = MagicMock()
-        mock_db.get.return_value = strategy
-        mock_db.query.return_value.filter_by.return_value.order_by.return_value.first.return_value = mock_run
+        mock_db.get.side_effect = [account, strategy]
+        # query() called twice: FIRST for PaperDeployment (active check), SECOND for BacktestRun
+        mock_db.query.side_effect = [mock_deployment_query, mock_backtest_query]
         
         from app.routers.paper import deploy
         from fastapi import HTTPException
@@ -360,7 +389,10 @@ class TestDeployValidation:
             deploy(1, DeployIn(strategy_id=5), mock_db)
         
         assert exc_info.value.status_code == 422
-        assert "exceeds your limit" in str(exc_info.value.detail)
+        detail = exc_info.value.detail
+        assert isinstance(detail, dict)
+        assert "validation" in detail
+        assert "exceeds your limit" in str(detail)
 
 
 class TestStepEvaluation:
@@ -371,9 +403,15 @@ class TestStepEvaluation:
         account.id = 1
         account.status = "RUNNING"
         account.strategy_id = None
+        account.cash = 100_000
         
         mock_db = MagicMock()
-        mock_db.get.return_value = account  # _acct returns this account
+        mock_db.get.return_value = account
+        
+        # Mock query for active deployment
+        mock_query = MagicMock()
+        mock_query.filter_by.return_value.first.return_value = None
+        mock_db.query.return_value = mock_query
         
         from app.routers.paper import step
         from fastapi import HTTPException
@@ -407,24 +445,32 @@ class TestStepEvaluation:
             "risk": {"max_position_pct": 50, "stop_loss_pct": 5, "take_profit_pct": None, "max_drawdown_pct": 25},
         }
         
-        mock_db = MagicMock()
-        # First call to get is for _acct (account), second for Strategy
-        mock_db.get.side_effect = [account, strategy]
-        mock_db.query.return_value.filter_by.return_value = []  # No existing orders
+        # Create a mock deployment
+        deployment = MagicMock()
+        deployment.id = 1
+        deployment.account_id = 1
+        deployment.strategy_id = 5
+        deployment.strategy_spec = strategy.spec
+        deployment.transaction_cost_bps = 0
+        deployment.slippage_bps = 0
+        deployment.max_position_pct = 50
+        deployment.stop_loss_pct = 5
+        deployment.take_profit_pct = None
+        deployment.max_drawdown_pct = 25
+        deployment.status = "ACTIVE"
         
-        with patch("app.routers.paper.market.get_bars") as mock_get_bars:
-            with patch("app.routers.paper.backtest.compute") as mock_compute:
-                with patch("app.routers.paper.backtest.signals") as mock_signals:
-                    # Setup mocks - use price that divides evenly to avoid rounding issues
-                    # qty = 100000 * 50 / 100 / 50000 = 1.0 exactly
-                    # cost = 1.0 * 50000 = 50000 <= 100000
-                    mock_df = MagicMock()
-                    mock_df.close.iloc = [50_000]  # Price > 50000 (entry threshold)
-                    mock_get_bars.return_value = (mock_df, {})
-                    mock_compute.return_value = mock_df
-                    mock_signals.return_value = (pd.Series([True]), pd.Series([False]))
-                    
-                    result = step(1, mock_db)
+        mock_db = MagicMock()
+        mock_db.get.side_effect = [account, strategy]  # First call for account, second for strategy
+        
+        # Mock query for active deployment
+        mock_query = MagicMock()
+        mock_query.filter_by.return_value.first.return_value = deployment
+        mock_db.query.return_value = mock_query
+        
+        with patch("app.routers.paper.paper.evaluate_strategy_step") as mock_eval:
+            mock_eval.return_value = {"action": "BUY", "details": {"qty": 1.0}}
+            
+            result = step(1, mock_db)
         
         assert result["action"] == "BUY"
     
@@ -451,26 +497,32 @@ class TestStepEvaluation:
             "risk": {"max_position_pct": 100, "stop_loss_pct": 5, "take_profit_pct": None, "max_drawdown_pct": 25},
         }
         
-        # Mock existing position (1 BTC bought at 55000)
-        mock_buy = MagicMock()
-        mock_buy.side = "BUY"
-        mock_buy.qty = 1.0
+        # Create a mock deployment
+        deployment = MagicMock()
+        deployment.id = 1
+        deployment.account_id = 1
+        deployment.strategy_id = 5
+        deployment.strategy_spec = strategy.spec
+        deployment.transaction_cost_bps = 0
+        deployment.slippage_bps = 0
+        deployment.max_position_pct = 100
+        deployment.stop_loss_pct = 5
+        deployment.take_profit_pct = None
+        deployment.max_drawdown_pct = 25
+        deployment.status = "ACTIVE"
         
         mock_db = MagicMock()
-        # First call to get is for _acct (account), second for Strategy
         mock_db.get.side_effect = [account, strategy]
-        mock_db.query.return_value.filter_by.return_value = [mock_buy]
         
-        with patch("app.routers.paper.market.get_bars") as mock_get_bars:
-            with patch("app.routers.paper.backtest.compute") as mock_compute:
-                with patch("app.routers.paper.backtest.signals") as mock_signals:
-                    mock_df = MagicMock()
-                    mock_df.close.iloc = [45_000]  # Price < 50000
-                    mock_get_bars.return_value = (mock_df, {})
-                    mock_compute.return_value = mock_df
-                    mock_signals.return_value = (pd.Series([False]), pd.Series([True]))
-                    
-                    result = step(1, mock_db)
+        # Mock query for active deployment
+        mock_query = MagicMock()
+        mock_query.filter_by.return_value.first.return_value = deployment
+        mock_db.query.return_value = mock_query
+        
+        with patch("app.routers.paper.paper.evaluate_strategy_step") as mock_eval:
+            mock_eval.return_value = {"action": "SELL", "details": {"qty": 1.0}}
+            
+            result = step(1, mock_db)
         
         assert result["action"] == "SELL"
     
@@ -483,6 +535,7 @@ class TestStepEvaluation:
         account.id = 1
         account.status = "RUNNING"
         account.strategy_id = 5
+        account.cash = 100_000
         
         strategy = MagicMock()
         strategy.spec = {
@@ -495,21 +548,32 @@ class TestStepEvaluation:
             "risk": {},
         }
         
-        mock_db = MagicMock()
-        # First call to get is for _acct (account), second for Strategy
-        mock_db.get.side_effect = [account, strategy]
-        mock_db.query.return_value.filter_by.return_value = []
+        # Create a mock deployment
+        deployment = MagicMock()
+        deployment.id = 1
+        deployment.account_id = 1
+        deployment.strategy_id = 5
+        deployment.strategy_spec = strategy.spec
+        deployment.transaction_cost_bps = 0
+        deployment.slippage_bps = 0
+        deployment.max_position_pct = 100
+        deployment.stop_loss_pct = None
+        deployment.take_profit_pct = None
+        deployment.max_drawdown_pct = 25
+        deployment.status = "ACTIVE"
         
-        with patch("app.routers.paper.backtest.signals") as mock_signals:
-            with patch("app.routers.paper.market.get_bars") as mock_get_bars:
-                with patch("app.routers.paper.backtest.compute") as mock_compute:
-                    mock_df = MagicMock()
-                    mock_df.close.iloc = [50_000]
-                    mock_get_bars.return_value = (mock_df, {})
-                    mock_compute.return_value = mock_df
-                    mock_signals.return_value = (pd.Series([False]), pd.Series([False]))
-                    
-                    result = step(1, mock_db)
+        mock_db = MagicMock()
+        mock_db.get.side_effect = [account, strategy]
+        
+        # Mock query for active deployment
+        mock_query = MagicMock()
+        mock_query.filter_by.return_value.first.return_value = deployment
+        mock_db.query.return_value = mock_query
+        
+        with patch("app.routers.paper.paper.evaluate_strategy_step") as mock_eval:
+            mock_eval.return_value = {"action": "HOLD", "details": {}}
+            
+            result = step(1, mock_db)
         
         assert result["action"] == "HOLD"
 
