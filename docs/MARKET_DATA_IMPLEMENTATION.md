@@ -127,7 +127,7 @@ class MarketBar(Base):
 
 ---
 
-## 4. Implemented Improvements (Phase 2 Complete)
+## 4. Implemented Improvements (Phase 2 + Phase 3A/3B Complete)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -139,7 +139,9 @@ class MarketBar(Base):
 | **NIFTY 50 Support** | ✅ Done | Added `^NSEI` (NIFTY 50) and `^NSEBANK` (NIFTY Bank) to watchlist with IST timezone |
 | **Pydantic Response Models** | ✅ Done | `MarketMeta`, `MarketBarRow`, `MarketBarsResponse`, `WatchlistItem`, `SymbolInfo`, `DataQuality` |
 | **New API Endpoints** | ✅ Done | `/api/market/symbols` for symbol metadata |
-| **Test Coverage** | ✅ Done | 220 backend tests (28 new for data quality, cache, NIFTY symbols) |
+| **Dashboard Data Quality Panel** | ✅ Done | `DataQualityPanel` component displays source, status, cache, issues, gaps, duplicates |
+| **CSV Historical Import CLI** | ✅ Done | `python -m app.cli.import_market_data` with dry-run, validation, DB import |
+| **Test Coverage** | ✅ Done | 251 backend tests (31 new for import), 16 frontend tests (8 new for DataQualityPanel) |
 
 ---
 
@@ -148,11 +150,10 @@ class MarketBar(Base):
 ### Important (P1)
 | Gap | Impact |
 |-----|--------|
-| **Local CSV/Parquet Import** | Can't backtest with verified historical data |
 | **Configurable Watchlist** | Watchlist still hardcoded in code |
 | **Data Provenance Tracking** | Can't fully audit data lineage |
 | **Market Hours Detection** | No automatic market open/closed status |
-| **Frontend Data Quality Display** | Quality metadata not yet shown in UI |
+| **Cache TTL Configuration** | Configurable cache expiration |
 
 ### Nice-to-Have (P2/P3)
 | Gap | Impact |
@@ -161,6 +162,7 @@ class MarketBar(Base):
 | **Volume Source Labeling** | Distinguish real vs generated volume |
 | **Cache TTL Configuration** | Configurable cache expiration |
 | **Corporate Action Verification** | Splits/dividends not verified |
+| **Parquet Import Support** | Alternative to CSV for large datasets |
 
 ---
 
@@ -168,11 +170,12 @@ class MarketBar(Base):
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
-| `test_market.py` | 30 | Mock generator, get_bars, watchlist, data structure, fallback, **data quality validation, cache behavior, NIFTY symbols** |
+| `test_market.py` | 30 | Mock generator, get_bars, watchlist, data structure, fallback, data quality validation, cache behavior, NIFTY symbols |
 | `test_schemas.py` | 35 | Pydantic models including new MarketData schemas |
-| Other test files | 190 | Unchanged |
+| `test_import_market_data.py` | 31 | CSV importer, validation, dry-run, DB import, run_import |
+| Other test files | 155 | Unchanged |
 
-**Total: 220 backend tests passing**
+**Total: 251 backend tests passing**
 
 ---
 
