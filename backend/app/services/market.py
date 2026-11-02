@@ -6,6 +6,14 @@ from typing import Optional, Tuple, List, Dict, Any
 import numpy as np
 import pandas as pd
 
+from app.config import get_settings
+
+# Cache TTL configuration (seconds) - loaded from settings
+def _get_ttl_config() -> dict:
+    """Get TTL configuration from settings."""
+    settings = get_settings()
+    return settings.market_data_ttl
+
 WATCHLIST = ["BTC-USD", "ETH-USD", "AAPL", "SPY", "^NSEI", "^NSEBANK"]
 FREQ = {"1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h", "1d": "1D"}
 YF_INTERVAL = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "60m", "1d": "1d"}
@@ -97,18 +105,42 @@ def _detect_gaps_duplicates(df: pd.DataFrame, tf: str) -> Tuple[List[str], List[
         dup_count = dup_mask.sum()
         duplicates.append(f"{dup_count} duplicate timestamp(s) found")
     
-    # Check for gaps (expected frequency)
-    expected_freq = FREQ.get(tf)
-    if expected_freq:
-        try:
-            expected_range = pd.date_range(start=df.index[0], end=df.index[-1], freq=expected_freq)
-            missing = expected_range.difference(df.index)
-            if len(missing) > 0:
-                gaps.append(f"{len(missing)} missing bar(s) detected (expected {len(expected_range)}, got {len(df)})")
-        except Exception:
-            pass  # Some frequencies may not work with date_range
+    # Check for gaps (expected frequency) - skip for daily timeframe
+    if tf != "1d":
+        expected_freq = FREQ.get(tf)
+        if expected_freq:
+            try:
+                expected_range = pd.date_range(start=df.index[0], end=df.index[-1], freq=expected_freq)
+                missing = expected_range.difference(df.index)
+                if len(missing) > 0:
+                    gaps.append(f"{len(missing)} missing bar(s) detected (expected {len(expected_range)}, got {len(df)})")
+            except Exception:
+                pass  # Some frequencies may not work with date_range
     
     return gaps, duplicates
+
+
+def _is_cache_fresh(cached_bars: list, timeframe: str) -> Tuple[bool, Optional[float]]:
+    """
+    Check if cached data is fresh based on TTL configuration.
+    
+    Returns:
+        Tuple of (is_fresh: bool, cache_age_seconds: float)
+    """
+    if not cached_bars:
+        return False, None
+    
+    # Get the cache write time from the newest bar's timestamp
+    # Note: This uses the bar timestamp as a proxy for cache write time
+    # In a production system, we would store a separate cached_at timestamp
+    newest_bar_ts = cached_bars[-1].ts
+    cache_age_seconds = (datetime.utcnow() - newest_bar_ts).total_seconds()
+    
+    ttl_config = _get_ttl_config()
+    ttl_seconds = ttl_config.get(timeframe, 3600)
+    
+    is_fresh = cache_age_seconds < ttl_seconds
+    return is_fresh, cache_age_seconds
 
 
 def _upsert_market_bars(db, df: pd.DataFrame, symbol: str, tf: str, source: str) -> int:
@@ -171,7 +203,10 @@ def _meta(
     gaps: Optional[List[str]] = None,
     duplicates: Optional[List[str]] = None,
     cached: bool = False,
-    cache_age_seconds: Optional[float] = None
+    cache_age_seconds: Optional[float] = None,
+    cache_ttl_seconds: Optional[int] = None,
+    is_stale: bool = False,
+    cache_write_timestamp: Optional[str] = None
 ) -> Dict[str, Any]:
     """Build metadata dictionary with quality information."""
     meta = {
@@ -191,6 +226,9 @@ def _meta(
             "bar_count": len(df),
             "cached": cached,
             "cache_age_seconds": cache_age_seconds,
+            "cache_ttl_seconds": cache_ttl_seconds,
+            "is_stale": is_stale,
+            "cache_write_timestamp": cache_write_timestamp,
         }
     }
     return meta
@@ -205,6 +243,14 @@ def get_bars(
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Returns (DataFrame, meta). Falls back to MOCK when live data is unavailable.
     
+    Implements cache decision flow:
+    1. Try cache first if db provided and use_cache enabled
+    2. Check cache freshness using TTL
+    3. If fresh, return cached data
+    4. If stale or missing, attempt to fetch live data
+    5. If live fetch fails but usable cache exists, return stale data with warning
+    5. If no usable data, fall back to mock
+    
     Args:
         symbol: Trading symbol (e.g., 'BTC-USD', '^NSEI')
         tf: Timeframe ('1m', '5m', '15m', '1h', '1d')
@@ -216,9 +262,9 @@ def get_bars(
         (DataFrame with OHLCV + indicators, metadata dict)
     """
     symbol = symbol.upper().replace("/", "-")
-    cache_key = (symbol, tf)
     
     # Try cache first if db provided and use_cache enabled
+    cached_bars = None
     if db is not None and use_cache:
         from app.models import MarketBar
         try:
@@ -235,13 +281,38 @@ def get_bars(
                 } for b in cached_bars], index=pd.to_datetime([b.ts for b in cached_bars]))
                 
                 # Check cache freshness
-                cache_age = (datetime.utcnow() - cached_bars[-1].ts).total_seconds() if cached_bars else None
-                meta = _meta(symbol, tf, df, cached_bars[0].source, "CACHED", cached=True, cache_age_seconds=cache_age)
-                return df, meta
+                is_fresh, cache_age = _is_cache_fresh(cached_bars, tf)
+                
+                if is_fresh:
+                    # Fresh cache - return immediately
+                    ttl_config = _get_ttl_config()
+                    ttl_seconds = ttl_config.get(tf, 3600)
+                    meta = _meta(
+                        symbol, tf, df, cached_bars[0].source, "CACHED",
+                        cached=True, cache_age_seconds=cache_age,
+                        cache_ttl_seconds=ttl_seconds, is_stale=False,
+                        cache_write_timestamp=cached_bars[-1].ts.isoformat()
+                    )
+                    return df, meta
+                
+                # Cache is stale - we'll try to fetch fresh data but keep cached as fallback
+                stale_cache_df = df
+                ttl_config = _get_ttl_config()
+                ttl_seconds = ttl_config.get(tf, 3600)
+                stale_cache_meta = _meta(
+                    symbol, tf, df, cached_bars[0].source, "STALE",
+                    cached=True, cache_age_seconds=cache_age,
+                    cache_ttl_seconds=ttl_seconds, is_stale=True,
+                    cache_write_timestamp=cached_bars[-1].ts.isoformat()
+                )
         except Exception:
             pass  # Cache read failed, fall through to live/mock
     
     # Try live data
+    live_df = None
+    live_meta = None
+    live_error = None
+    
     if os.getenv("USE_LIVE_DATA", "true") == "true":
         try:
             import yfinance as yf
@@ -261,14 +332,20 @@ def get_bars(
                 gaps, duplicates = _detect_gaps_duplicates(df, tf)
                 
                 # Write to cache
-                cached_count = 0
                 if db is not None:
-                    cached_count = _upsert_market_bars(db, df, symbol, tf, "YAHOO FINANCE")
+                    _upsert_market_bars(db, df, symbol, tf, "YAHOO FINANCE")
                 
-                meta = _meta(symbol, tf, df, "YAHOO FINANCE", "DELAYED", issues, gaps, duplicates, cached=False)
+                meta = _meta(symbol, tf, df, "YAHOO FINANCE", "DELAYED", issues, gaps, duplicates, cached=False, cache_ttl_seconds=None, is_stale=False, cache_write_timestamp=None)
                 return df, meta
-        except Exception:
+        except Exception as e:
+            live_error = str(e)
             pass
+    
+    # If we have stale cache and live failed, return stale data with warning
+    if 'stale_cache_df' in locals() and stale_cache_df is not None:
+        stale_cache_meta["data_quality"]["issues"] = stale_cache_meta["data_quality"].get("issues", []) + \
+            [f"Live data unavailable ({live_error if live_error else 'unknown error'}); returning stale cached data"]
+        return stale_cache_df, stale_cache_meta
     
     # Fallback to mock
     df = _mock(symbol, tf, n)
@@ -279,5 +356,5 @@ def get_bars(
     if db is not None:
         _upsert_market_bars(db, df, symbol, tf, "MOCK GENERATOR")
     
-    meta = _meta(symbol, tf, df, "MOCK GENERATOR", "SIMULATED", issues, gaps, duplicates, cached=False)
+    meta = _meta(symbol, tf, df, "MOCK GENERATOR", "SIMULATED", issues, gaps, duplicates, cached=False, cache_ttl_seconds=None, is_stale=False, cache_write_timestamp=None)
     return df, meta

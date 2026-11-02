@@ -266,13 +266,13 @@ class TestDataQuality:
         assert (df_clean["open"] > 0).all()
     
     def test_gap_detection(self):
-        """Test gap detection in time series."""
+        """Test gap detection in time series for intraday timeframes."""
         from app.services.market import _detect_gaps_duplicates
         import pandas as pd
         
-        # Create data with a gap
-        idx = pd.date_range("2024-01-01", periods=5, freq="D")
-        idx = idx.delete(2)  # Remove middle day
+        # Create data with a gap (intraday timeframe)
+        idx = pd.date_range("2024-01-01", periods=5, freq="h")
+        idx = idx.delete(2)  # Remove middle hour
         df = pd.DataFrame({
             "open": [100, 101, 102, 103],
             "high": [101, 102, 103, 104],
@@ -281,7 +281,7 @@ class TestDataQuality:
             "volume": [1000, 1000, 1000, 1000],
         }, index=idx)
         
-        gaps, duplicates = _detect_gaps_duplicates(df, "1d")
+        gaps, duplicates = _detect_gaps_duplicates(df, "1h")
         
         assert len(gaps) > 0
         assert "missing" in gaps[0].lower()
