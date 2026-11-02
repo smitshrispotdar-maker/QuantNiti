@@ -1,0 +1,9 @@
+# Keep the build context portable and never bake secrets into the image.
+# backend/.env is injected at runtime by docker-compose (env_file) instead.
+venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.env

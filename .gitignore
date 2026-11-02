@@ -1,0 +1,48 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Python cache & testing
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Cached market data (regenerated on demand by app/services/market_data.py)
+backend/data/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Node
+node_modules/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker_data/
+*.pid
+
+# Database files (if using SQLite later)
+*.db
+*.sqlite3

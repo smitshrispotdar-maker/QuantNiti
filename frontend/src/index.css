@@ -1,0 +1,9 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+body { @apply bg-ink text-slate-200 font-sans; }
+.num { @apply font-mono tabular-nums; }
+.card { @apply bg-panel border border-line rounded-md; }
+.btn { @apply px-3 py-1.5 rounded border border-line bg-line/40 hover:bg-line text-sm; }
+.btn-ai { @apply border-ai/50 text-ai hover:bg-ai/10; }
+.badge { @apply num text-[10px] px-1.5 py-0.5 rounded border; }
+.watermark::after { content: "PAPER / SIMULATED"; position: fixed; right: 12px; bottom: 8px; font: 600 11px 'JetBrains Mono'; color: #00E5FF55; pointer-events: none; z-index: 50; }
+.react-flow__attribution { display: none; }

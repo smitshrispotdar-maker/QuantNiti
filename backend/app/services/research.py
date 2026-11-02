@@ -1,0 +1,23 @@
+"""Multi-agent research. FACTS are computed from data; AGENT views are templated interpretations of those facts
+(deterministic stand-ins — replace with an LLM that only receives `facts`). Agents cannot trade."""
+import numpy as np
+from .indicators import rsi, ema, sma, macd
+def run(df):
+    c = df.close; r = rsi(c).iloc[-1]; e20, e50 = ema(c, 20).iloc[-1], ema(c, 50).iloc[-1]; h = macd(c)[2].iloc[-1]
+    vol = c.pct_change().tail(30).std() * np.sqrt(252) * 100; dd = (c / c.cummax() - 1).iloc[-1] * 100
+    facts = {"last_close": round(c.iloc[-1], 2), "rsi14": round(r, 1), "ema20": round(e20, 2), "ema50": round(e50, 2),
+             "macd_hist": round(h, 3), "ann_vol_30d_pct": round(vol, 1), "drawdown_from_peak_pct": round(dd, 1),
+             "return_30bar_pct": round((c.iloc[-1] / c.iloc[-31] - 1) * 100, 1)}
+    bull, bear = [], []
+    (bull if e20 > e50 else bear).append("EMA20 is " + ("above" if e20 > e50 else "below") + " EMA50.")
+    (bull if h > 0 else bear).append("MACD histogram is " + ("positive" if h > 0 else "negative") + ".")
+    if r < 35: bull.append(f"RSI {r:.0f} is oversold — mean-reversion setup.")
+    if r > 65: bear.append(f"RSI {r:.0f} is overbought — pullback risk.")
+    if facts["return_30bar_pct"] > 0: bull.append("Positive 30-bar momentum.")
+    else: bear.append("Negative 30-bar momentum.")
+    risk = "HIGH" if vol > 60 or dd < -25 else "MODERATE" if vol > 30 else "LOW"
+    stance = "LEAN LONG" if len(bull) - len(bear) >= 2 else "LEAN FLAT" if len(bear) - len(bull) >= 2 else "NEUTRAL"
+    return {"facts": facts, "interpretations": {"market_analyst": f"Trend {'up' if e20 > e50 else 'down'}, volatility {vol:.0f}% annualised.",
+            "bull": bull, "bear": bear, "risk_analyst": f"Risk level {risk}. Suggest stop-loss ≥ {max(2, round(vol / 16, 1))}% of price.",
+            "strategy_manager": f"{stance}. Evidence: {len(bull)} bullish vs {len(bear)} bearish. Research only — not advice."},
+            "label": "AI-GENERATED INTERPRETATION · PAPER/SIMULATED"}
