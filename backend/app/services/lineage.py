@@ -55,6 +55,8 @@ def build_lineage(
     
     if conversation_id:
         conversation = db.get(Conversation, conversation_id)
+        if conversation and conversation.user_id != user_id:
+            return []  # Not authorized
     elif strategy_id:
         strategy = db.query(Strategy).filter_by(id=strategy_id, user_id=user_id).first()
     else:
@@ -163,11 +165,8 @@ def build_lineage(
         ).to_dict())
     
     # 4. Research Events
-    research_runs = db.query(ResearchRun).order_by(ResearchRun.created_at).all()
+    research_runs = db.query(ResearchRun).filter_by(user_id=user_id).order_by(ResearchRun.created_at).all()
     for rr in research_runs:
-        # Filter by user/strategy if possible
-        if rr.user_id != user_id:
-            continue
         # Filter by strategy if specified
         if strategy_id and rr.strategy_id != strategy_id:
             continue
@@ -273,36 +272,45 @@ def build_lineage(
     return events
 
 
-def get_entity_lineage(db: Session, entity_type: str, entity_id: int) -> List[Dict[str, Any]]:
+def get_entity_lineage(db: Session, entity_type: str, entity_id: int, user_id: int = 1) -> List[Dict[str, Any]]:
     """
     Get lineage for a specific entity (strategy, backtest, deployment, etc.).
     """
     if entity_type == "strategy":
         strategy = db.get(Strategy, entity_id)
-        if not strategy:
+        if not strategy or strategy.user_id != user_id:
             return []
-        return build_lineage(db, strategy_id=entity_id)
+        return build_lineage(db, strategy_id=entity_id, user_id=user_id)
     elif entity_type == "conversation":
-        return build_lineage(db, conversation_id=entity_id)
+        conv = db.get(Conversation, entity_id)
+        if not conv or conv.user_id != user_id:
+            return []
+        return build_lineage(db, conversation_id=entity_id, user_id=user_id)
     elif entity_type == "backtest":
         bt = db.get(BacktestRun, entity_id)
         if not bt:
             return []
-        return build_lineage(db, strategy_id=bt.strategy_id)
+        strat = db.get(Strategy, bt.strategy_id)
+        if not strat or strat.user_id != user_id:
+            return []
+        return build_lineage(db, strategy_id=bt.strategy_id, user_id=user_id)
     elif entity_type == "deployment":
         dep = db.get(PaperDeployment, entity_id)
         if not dep:
             return []
-        return build_lineage(db, strategy_id=dep.strategy_id)
+        strat = db.get(Strategy, dep.strategy_id)
+        if not strat or strat.user_id != user_id:
+            return []
+        return build_lineage(db, strategy_id=dep.strategy_id, user_id=user_id)
     elif entity_type == "journal":
         je = db.get(JournalEntry, entity_id)
-        if not je:
+        if not je or je.user_id != user_id:
             return []
-        return build_lineage(db, strategy_id=je.strategy_id)
+        return build_lineage(db, strategy_id=je.strategy_id, user_id=user_id)
     elif entity_type == "research":
         rr = db.get(ResearchRun, entity_id)
-        if not rr:
+        if not rr or rr.user_id != user_id:
             return []
-        return build_lineage(db, strategy_id=rr.strategy_id)
+        return build_lineage(db, strategy_id=rr.strategy_id, user_id=user_id)
     
     return []

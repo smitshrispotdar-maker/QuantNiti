@@ -2,9 +2,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import PaperAccount, PaperOrder, PaperDeployment, PaperPosition, Strategy, BacktestRun
+from ..models import PaperAccount, PaperOrder, PaperDeployment, PaperPosition, Strategy, BacktestRun, User
 from ..schemas import AccountIn, OrderIn, DeployIn, StrategySpec
 from ..services import market, backtest, validation, paper
+from ..services.auth import get_current_user_dep
 router = APIRouter(prefix="/api/paper", tags=["paper"])
 
 def _acct(db: Session, aid: int) -> PaperAccount:
@@ -50,10 +51,10 @@ def _fill(db: Session, a: PaperAccount, symbol: str, side: str, qty: float, reas
     o = PaperOrder(account_id=a.id, symbol=symbol, side=side, qty=qty, fill_price=px, reason=reason); db.add(o); db.commit(); return o
 
 @router.get("/accounts")
-def accounts(db: Session = Depends(get_db)):
+def accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """List all paper accounts with their state."""
     results = []
-    for a in db.query(PaperAccount).order_by(PaperAccount.id):
+    for a in db.query(PaperAccount).filter_by(user_id=current_user.id).order_by(PaperAccount.id):
         if a.strategy_id:
             # Has deployment - get deployment state
             deployment = db.query(PaperDeployment).filter_by(account_id=a.id, status="ACTIVE").first()
@@ -66,16 +67,18 @@ def accounts(db: Session = Depends(get_db)):
     return results
 
 @router.post("/accounts")
-def create(body: AccountIn, db: Session = Depends(get_db)):
+def create(body: AccountIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Create a new paper trading account."""
-    a = PaperAccount(name=body.name, starting_cash=body.starting_cash, cash=body.starting_cash)
+    a = PaperAccount(user_id=current_user.id, name=body.name, starting_cash=body.starting_cash, cash=body.starting_cash)
     db.add(a); db.commit(); db.refresh(a)
     return _legacy_state(db, a)
 
 @router.get("/accounts/{aid}")
-def get(aid: int, db: Session = Depends(get_db)):
+def get(aid: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Get account state (legacy or deployment)."""
     a = _acct(db, aid)
+    if a.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     if a.strategy_id:
         deployment = db.query(PaperDeployment).filter_by(account_id=aid, status="ACTIVE").first()
         if deployment:
@@ -86,9 +89,11 @@ def get(aid: int, db: Session = Depends(get_db)):
     return s
 
 @router.post("/accounts/{aid}/orders")
-def order(aid: int, body: OrderIn, db: Session = Depends(get_db)):
+def order(aid: int, body: OrderIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Place a manual order (legacy endpoint for non-deployment accounts)."""
     a = _acct(db, aid)
+    if a.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     if a.status != "RUNNING": raise HTTPException(409, f"Account is {a.status}; orders blocked.")
     px = float(market.get_bars(body.symbol.upper(), "1d", 60)[0].close.iloc[-1]); cost = body.qty * px
     if body.side == "BUY" and cost > a.cash: raise HTTPException(422, "Insufficient simulated cash.")
@@ -100,9 +105,11 @@ def order(aid: int, body: OrderIn, db: Session = Depends(get_db)):
     return {"order_id": o.id, "fill_price": o.fill_price, "label": o.label}
 
 @router.post("/accounts/{aid}/control/{action}")
-def control(aid: int, action: str, db: Session = Depends(get_db)):
+def control(aid: int, action: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Control account status (pause/resume/stop/kill)."""
     a = _acct(db, aid)
+    if a.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     m = {"pause": "PAUSED", "resume": "RUNNING", "stop": "STOPPED", "kill": "KILLED"}
     if action not in m: raise HTTPException(400, "Unknown action")
     if a.status == "KILLED" and action != "kill": raise HTTPException(409, "Kill switch engaged; create a new account.")
@@ -112,18 +119,22 @@ def control(aid: int, action: str, db: Session = Depends(get_db)):
 # --- Legacy API for backwards compatibility ---
 
 @router.post("/accounts/{aid}/deploy")
-def deploy(aid: int, body: DeployIn, db: Session = Depends(get_db)):
+def deploy(aid: int, body: DeployIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Legacy deploy endpoint - creates deployment and returns account state."""
     # This maintains the old API: deploy to account, not deployment ID
+    a = _acct(db, aid)
+    if a.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     result = create_deployment(aid, body, db)
     # Return legacy state for backwards compatibility
-    a = _acct(db, aid)
     return _legacy_state(db, a)
 
 @router.post("/accounts/{aid}/step")
-def step(aid: int, db: Session = Depends(get_db)):
+def step(aid: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Legacy step endpoint - evaluates strategy on account's deployed strategy."""
     a = _acct(db, aid)
+    if a.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     if not a.strategy_id:
         raise HTTPException(409, "No strategy deployed.")
     
@@ -142,7 +153,7 @@ def step(aid: int, db: Session = Depends(get_db)):
 # --- Deployment Endpoints ---
 
 @router.post("/accounts/{aid}/deployments")
-def create_deployment(aid: int, body: DeployIn, db: Session = Depends(get_db)):
+def create_deployment(aid: int, body: DeployIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """
     Create a new paper trading deployment from a validated strategy.
     
@@ -153,6 +164,8 @@ def create_deployment(aid: int, body: DeployIn, db: Session = Depends(get_db)):
     - Account must not have an active deployment
     """
     a = _acct(db, aid)
+    if a.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     if a.status != "RUNNING":
         raise HTTPException(409, f"Account is {a.status}; cannot deploy.")
     
@@ -202,15 +215,19 @@ def create_deployment(aid: int, body: DeployIn, db: Session = Depends(get_db)):
     return paper.get_deployment_state(db, deployment)
 
 @router.get("/deployments/{did}")
-def get_deployment(did: int, db: Session = Depends(get_db)):
+def get_deployment(did: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Get deployment state with positions, orders, trades, metrics."""
     deployment = _deployment(db, did)
+    if deployment.account.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     return paper.get_deployment_state(db, deployment)
 
 @router.get("/accounts/{aid}/deployments")
-def list_deployments(aid: int, db: Session = Depends(get_db)):
+def list_deployments(aid: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """List all deployments for an account."""
     _acct(db, aid)  # Verify account exists
+    if current_user.id != db.get(PaperAccount, aid).user_id:
+        raise HTTPException(403, "Not authorized")
     deployments = db.query(PaperDeployment).filter_by(account_id=aid).order_by(PaperDeployment.id.desc()).all()
     return [{
         "id": d.id,
@@ -228,7 +245,7 @@ def list_deployments(aid: int, db: Session = Depends(get_db)):
     } for d in deployments]
 
 @router.post("/deployments/{did}/step")
-def step_deployment(did: int, force: bool = Query(False), db: Session = Depends(get_db)):
+def step_deployment(did: int, force: bool = Query(False), db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """
     Evaluate deployed strategy on latest market data and execute signals.
     
@@ -239,6 +256,8 @@ def step_deployment(did: int, force: bool = Query(False), db: Session = Depends(
     - Stop loss / take profit checked intra-bar
     """
     deployment = _deployment(db, did)
+    if deployment.account.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     try:
         result = paper.evaluate_strategy_step(db, deployment, force=force)
         return result
@@ -247,9 +266,11 @@ def step_deployment(did: int, force: bool = Query(False), db: Session = Depends(
                            {"error": e.code, "message": e.message})
 
 @router.post("/deployments/{did}/control/{action}")
-def control_deployment(did: int, action: str, db: Session = Depends(get_db)):
+def control_deployment(did: int, action: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Control deployment status (pause/resume/stop/close)."""
     deployment = _deployment(db, did)
+    if deployment.account.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     valid_actions = {"pause": "PAUSED", "resume": "ACTIVE", "stop": "STOPPED", "close": "CLOSED"}
     if action not in valid_actions:
         raise HTTPException(400, "Unknown action. Use: pause, resume, stop, close")
@@ -266,9 +287,11 @@ def control_deployment(did: int, action: str, db: Session = Depends(get_db)):
     return paper.get_deployment_state(db, deployment)
 
 @router.post("/deployments/{did}/orders")
-def place_deployment_order(did: int, body: OrderIn, db: Session = Depends(get_db)):
+def place_deployment_order(did: int, body: OrderIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Place a manual order within a deployment."""
     deployment = _deployment(db, did)
+    if deployment.account.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     if deployment.status != "ACTIVE":
         raise HTTPException(409, f"Deployment is {deployment.status}; orders blocked.")
     
@@ -280,9 +303,11 @@ def place_deployment_order(did: int, body: OrderIn, db: Session = Depends(get_db
                            {"error": e.code, "message": e.message})
 
 @router.get("/deployments/{did}/trades")
-def get_deployment_trades(did: int, db: Session = Depends(get_db)):
+def get_deployment_trades(did: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Get all completed trades for a deployment."""
-    _deployment(db, did)
+    deployment = _deployment(db, did)
+    if deployment.account.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     from ..models import PaperTrade
     trades = db.query(PaperTrade).filter_by(deployment_id=did).order_by(PaperTrade.entry_ts).all()
     return [{

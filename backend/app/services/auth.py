@@ -122,11 +122,49 @@ def register_user(db: Session, user_data: UserRegister) -> User:
     return user
 
 
+def get_current_user(db: Session, token: str) -> User:
+    """Get the current user from a JWT token. Returns SQLAlchemy User model."""
+    user_id = decode_token(token)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise AuthError("User not found")
+    if not user.is_active:
+        raise AuthError("Account is disabled")
+    return user
+
+
 def get_current_user_dep(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
+) -> User:
+    """FastAPI dependency for getting current user from Bearer token. Returns SQLAlchemy User model."""
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        return get_current_user(db, credentials.credentials)
+    except AuthError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def get_current_user_safe_dep(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
 ) -> UserResponseSafe:
-    """FastAPI dependency for getting current user from Bearer token."""
+    """FastAPI dependency for getting current user safe response from Bearer token. Returns UserResponseSafe."""
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -150,6 +188,17 @@ def get_current_user_dep(
         )
 
 
+def get_current_user(db: Session, token: str) -> User:
+    """Get the current user from a JWT token. Returns SQLAlchemy User model."""
+    user_id = decode_token(token)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise AuthError("User not found")
+    if not user.is_active:
+        raise AuthError("Account is disabled")
+    return user
+
+
 def user_to_safe_response(user: User) -> UserResponseSafe:
     """Convert User model to safe response (no password hash)."""
     return UserResponseSafe(
@@ -158,14 +207,3 @@ def user_to_safe_response(user: User) -> UserResponseSafe:
         is_active=user.is_active,
         created_at=user.created_at,
     )
-
-
-def get_current_user(db: Session, token: str) -> User:
-    """Get the current user from a JWT token."""
-    user_id = decode_token(token)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise AuthError("User not found")
-    if not user.is_active:
-        raise AuthError("Account is disabled")
-    return user

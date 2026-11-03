@@ -7,6 +7,17 @@ from app.schemas import StrategySpec, IndicatorSpec, Rule, RiskLimits
 from app.services import market, backtest
 
 
+@pytest.fixture
+def mock_current_user():
+    """Create a mock current user for testing."""
+    user = MagicMock()
+    user.id = 1
+    user.email = "test@example.com"
+    user.is_active = True
+    user.created_at = datetime.now()
+    return user
+
+
 class TestPaperAccountState:
     """Tests for the _state function that computes account state from orders."""
     
@@ -290,10 +301,11 @@ class TestFillFunction:
 class TestDeployValidation:
     """Tests for strategy deployment validation."""
     
-    def test_deploy_requires_passing_backtest(self):
+    def test_deploy_requires_passing_backtest(self, mock_current_user):
         """Test that deploy validates backtest results."""
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         account.strategy_id = None
         account.cash = 100_000
@@ -326,7 +338,7 @@ class TestDeployValidation:
         from app.schemas import DeployIn
         
         with pytest.raises(HTTPException) as exc_info:
-            deploy(1, DeployIn(strategy_id=5), mock_db)
+            deploy(1, DeployIn(strategy_id=5), mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 422
         # Error detail is a dict with validation error
@@ -335,10 +347,11 @@ class TestDeployValidation:
         assert "validation" in detail
         assert "No backtest found for this strategy version" in str(detail)
     
-    def test_deploy_fails_validation(self):
+    def test_deploy_fails_validation(self, mock_current_user):
         """Test deploy fails when backtest validation fails."""
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         account.strategy_id = None
         account.cash = 100_000
@@ -386,7 +399,7 @@ class TestDeployValidation:
         from app.schemas import DeployIn
         
         with pytest.raises(HTTPException) as exc_info:
-            deploy(1, DeployIn(strategy_id=5), mock_db)
+            deploy(1, DeployIn(strategy_id=5), mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 422
         detail = exc_info.value.detail
@@ -398,9 +411,10 @@ class TestDeployValidation:
 class TestStepEvaluation:
     """Tests for the step function that evaluates strategy on latest bar."""
     
-    def test_step_no_strategy_deployed(self):
+    def test_step_no_strategy_deployed(self, mock_current_user):
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         account.strategy_id = None
         account.cash = 100_000
@@ -417,18 +431,19 @@ class TestStepEvaluation:
         from fastapi import HTTPException
         
         with pytest.raises(HTTPException) as exc_info:
-            step(1, mock_db)
+            step(1, mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 409
         assert "No strategy deployed" in str(exc_info.value.detail)
     
-    def test_step_generates_buy_signal(self):
+    def test_step_generates_buy_signal(self, mock_current_user):
         """Test step generates BUY when entry signal fires."""
         import pandas as pd
         from app.routers.paper import step
         
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         account.strategy_id = 5
         account.cash = 100_000
@@ -449,6 +464,7 @@ class TestStepEvaluation:
         deployment = MagicMock()
         deployment.id = 1
         deployment.account_id = 1
+        deployment.account = account
         deployment.strategy_id = 5
         deployment.strategy_spec = strategy.spec
         deployment.transaction_cost_bps = 0
@@ -470,17 +486,18 @@ class TestStepEvaluation:
         with patch("app.routers.paper.paper.evaluate_strategy_step") as mock_eval:
             mock_eval.return_value = {"action": "BUY", "details": {"qty": 1.0}}
             
-            result = step(1, mock_db)
+            result = step(1, mock_db, current_user=mock_current_user)
         
         assert result["action"] == "BUY"
     
-    def test_step_generates_sell_signal(self):
+    def test_step_generates_sell_signal(self, mock_current_user):
         """Test step generates SELL when exit signal fires."""
         import pandas as pd
         from app.routers.paper import step
         
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         account.strategy_id = 5
         account.cash = 50_000
@@ -501,6 +518,7 @@ class TestStepEvaluation:
         deployment = MagicMock()
         deployment.id = 1
         deployment.account_id = 1
+        deployment.account = account
         deployment.strategy_id = 5
         deployment.strategy_spec = strategy.spec
         deployment.transaction_cost_bps = 0
@@ -522,17 +540,18 @@ class TestStepEvaluation:
         with patch("app.routers.paper.paper.evaluate_strategy_step") as mock_eval:
             mock_eval.return_value = {"action": "SELL", "details": {"qty": 1.0}}
             
-            result = step(1, mock_db)
+            result = step(1, mock_db, current_user=mock_current_user)
         
         assert result["action"] == "SELL"
     
-    def test_step_hold_no_signal(self):
+    def test_step_hold_no_signal(self, mock_current_user):
         """Test step returns HOLD when no signal."""
         import pandas as pd
         from app.routers.paper import step
         
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         account.strategy_id = 5
         account.cash = 100_000
@@ -552,6 +571,7 @@ class TestStepEvaluation:
         deployment = MagicMock()
         deployment.id = 1
         deployment.account_id = 1
+        deployment.account = account
         deployment.strategy_id = 5
         deployment.strategy_spec = strategy.spec
         deployment.transaction_cost_bps = 0
@@ -573,7 +593,7 @@ class TestStepEvaluation:
         with patch("app.routers.paper.paper.evaluate_strategy_step") as mock_eval:
             mock_eval.return_value = {"action": "HOLD", "details": {}}
             
-            result = step(1, mock_db)
+            result = step(1, mock_db, current_user=mock_current_user)
         
         assert result["action"] == "HOLD"
 
@@ -581,9 +601,10 @@ class TestStepEvaluation:
 class TestControlActions:
     """Tests for account control actions (pause, resume, stop, kill)."""
     
-    def test_control_pause(self):
+    def test_control_pause(self, mock_current_user):
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         
         mock_db = MagicMock()
@@ -591,14 +612,15 @@ class TestControlActions:
         
         from app.routers.paper import control
         
-        result = control(1, "pause", mock_db)
+        result = control(1, "pause", mock_db, current_user=mock_current_user)
         
         assert account.status == "PAUSED"
         assert result["status"] == "PAUSED"
     
-    def test_control_resume(self):
+    def test_control_resume(self, mock_current_user):
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "PAUSED"
         
         mock_db = MagicMock()
@@ -606,14 +628,15 @@ class TestControlActions:
         
         from app.routers.paper import control
         
-        result = control(1, "resume", mock_db)
+        result = control(1, "resume", mock_db, current_user=mock_current_user)
         
         assert account.status == "RUNNING"
         assert result["status"] == "RUNNING"
     
-    def test_control_stop(self):
+    def test_control_stop(self, mock_current_user):
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         
         mock_db = MagicMock()
@@ -621,14 +644,15 @@ class TestControlActions:
         
         from app.routers.paper import control
         
-        result = control(1, "stop", mock_db)
+        result = control(1, "stop", mock_db, current_user=mock_current_user)
         
         assert account.status == "STOPPED"
         assert result["status"] == "STOPPED"
     
-    def test_control_kill(self):
+    def test_control_kill(self, mock_current_user):
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "RUNNING"
         
         mock_db = MagicMock()
@@ -636,15 +660,16 @@ class TestControlActions:
         
         from app.routers.paper import control
         
-        result = control(1, "kill", mock_db)
+        result = control(1, "kill", mock_db, current_user=mock_current_user)
         
         assert account.status == "KILLED"
         assert result["status"] == "KILLED"
     
-    def test_control_kill_irreversible(self):
+    def test_control_kill_irreversible(self, mock_current_user):
         """Once killed, cannot resume/pause/stop."""
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         account.status = "KILLED"
         
         mock_db = MagicMock()
@@ -654,14 +679,15 @@ class TestControlActions:
         from fastapi import HTTPException
         
         with pytest.raises(HTTPException) as exc_info:
-            control(1, "resume", mock_db)
+            control(1, "resume", mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 409
         assert "Kill switch engaged" in str(exc_info.value.detail)
     
-    def test_control_invalid_action(self):
+    def test_control_invalid_action(self, mock_current_user):
         account = MagicMock()
         account.id = 1
+        account.user_id = 1
         
         mock_db = MagicMock()
         mock_db.get.return_value = account
@@ -670,7 +696,7 @@ class TestControlActions:
         from fastapi import HTTPException
         
         with pytest.raises(HTTPException) as exc_info:
-            control(1, "invalid", mock_db)
+            control(1, "invalid", mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 400
 

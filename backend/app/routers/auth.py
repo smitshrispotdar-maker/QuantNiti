@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.db import get_db
+from app.models import User
 from app.schemas.auth import (
     UserRegister,
     UserLogin,
@@ -51,9 +52,9 @@ def login(credentials: UserLogin, response: Response, db: Session = Depends(get_
 
 
 @router.get("/me", response_model=UserResponseSafe)
-def me(current_user=Depends(get_current_user_dep)):
+def me(current_user: User = Depends(get_current_user_dep)):
     """Get current authenticated user."""
-    return current_user
+    return user_to_safe_response(current_user)
 
 
 @router.post("/logout")
@@ -70,8 +71,8 @@ def logout(response: Response):
 def get_current_user_dep(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
-):
-    """FastAPI dependency for getting current user from Bearer token."""
+) -> User:
+    """FastAPI dependency for getting current user from Bearer token. Returns SQLAlchemy User model."""
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

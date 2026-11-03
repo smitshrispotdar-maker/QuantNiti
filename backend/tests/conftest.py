@@ -1,6 +1,12 @@
 """Pytest configuration and fixtures for QuantNiti backend tests."""
 import sys
+import os
 from pathlib import Path
+
+# Set test environment BEFORE importing app
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["SECRET_KEY"] = "test-secret-key-for-testing-only"
+os.environ["CORS_ORIGINS"] = "http://localhost:5173"
 
 # Add backend to path
 backend_dir = Path(__file__).parent.parent
@@ -10,6 +16,36 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
+from fastapi.testclient import TestClient
+
+# Import the app for dependency overrides
+from app.main import app
+from app.services.auth import get_current_user_dep
+from app.models import User, Base
+from app.db import SessionLocal, engine
+
+
+@pytest.fixture(autouse=True, scope="session")
+def create_test_db():
+    """Create test database tables."""
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    """Override the authentication dependency for tests."""
+    mock_user = MagicMock(spec=User)
+    mock_user.id = 1
+    mock_user.email = "test@example.com"
+    mock_user.is_active = True
+    mock_user.created_at = datetime.now()
+    
+    app.dependency_overrides[get_current_user_dep] = lambda: mock_user
+    yield
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from ..db import get_db
-from ..models import JournalEntry, Strategy, Conversation, BacktestRun, PaperDeployment, ResearchRun
+from ..models import JournalEntry, Strategy, Conversation, BacktestRun, PaperDeployment, ResearchRun, User
 from ..schemas import (
     JournalIn, ReviewIn, JournalEntryCreate, JournalEntryUpdate,
     JournalEntryResponse, JournalEntryListResponse
 )
 from typing import Optional
 from datetime import datetime
+from ..services.auth import get_current_user_dep
 
 router = APIRouter(prefix="/api/journal", tags=["journal"])
 
@@ -52,10 +53,10 @@ def list_entries(
     backtest_run_id: Optional[int] = None,
     research_run_id: Optional[int] = None,
     deployment_id: Optional[int] = None,
-    user_id: int = 1,  # TODO: replace with actual auth
+    current_user: User = Depends(get_current_user_dep),
 ):
     """List journal entries with pagination and filtering."""
-    query = db.query(JournalEntry).filter(JournalEntry.user_id == user_id)
+    query = db.query(JournalEntry).filter(JournalEntry.user_id == current_user.id)
     
     if strategy_id:
         query = query.filter(JournalEntry.strategy_id == strategy_id)
@@ -84,21 +85,21 @@ def list_entries(
 
 
 @router.post("")
-def create_entry(body: JournalEntryCreate, db: Session = Depends(get_db), user_id: int = 1):
+def create_entry(body: JournalEntryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Create a new journal entry."""
     # Validate foreign key references
     if body.strategy_id:
         strategy = db.get(Strategy, body.strategy_id)
         if not strategy:
             raise HTTPException(404, "Strategy not found")
-        if strategy.user_id != 1:  # TODO: use actual user_id
+        if strategy.user_id != current_user.id:
             raise HTTPException(403, "Not authorized")
     
     if body.conversation_id:
         conv = db.get(Conversation, body.conversation_id)
         if not conv:
             raise HTTPException(404, "Conversation not found")
-        if conv.user_id != 1:
+        if conv.user_id != current_user.id:
             raise HTTPException(403, "Not authorized")
     
     if body.backtest_run_id:
@@ -120,7 +121,7 @@ def create_entry(body: JournalEntryCreate, db: Session = Depends(get_db), user_i
     recommendation = body.recommendation or body.title
     
     entry = JournalEntry(
-        user_id=1,  # TODO: replace with actual auth
+        user_id=current_user.id,
         title=body.title,
         decision_type=body.decision_type,
         status=body.status,
@@ -146,23 +147,23 @@ def create_entry(body: JournalEntryCreate, db: Session = Depends(get_db), user_i
 
 
 @router.get("/{jid}")
-def get_entry(jid: int, db: Session = Depends(get_db), user_id: int = 1):
+def get_entry(jid: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Get a single journal entry."""
     entry = db.get(JournalEntry, jid)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    if entry.user_id != user_id:
+    if entry.user_id != current_user.id:
         raise HTTPException(403, "Not authorized")
     return _to_response(entry)
 
 
 @router.patch("/{jid}")
-def update_entry(jid: int, body: JournalEntryUpdate, db: Session = Depends(get_db), user_id: int = 1):
+def update_entry(jid: int, body: JournalEntryUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Update a journal entry."""
     entry = db.get(JournalEntry, jid)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    if entry.user_id != user_id:
+    if entry.user_id != current_user.id:
         raise HTTPException(403, "Not authorized")
     
     # Update only provided fields
@@ -177,12 +178,12 @@ def update_entry(jid: int, body: JournalEntryUpdate, db: Session = Depends(get_d
 
 
 @router.delete("/{jid}")
-def delete_entry(jid: int, db: Session = Depends(get_db), user_id: int = 1):
+def delete_entry(jid: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Delete a journal entry."""
     entry = db.get(JournalEntry, jid)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    if entry.user_id != user_id:
+    if entry.user_id != current_user.id:
         raise HTTPException(403, "Not authorized")
     db.delete(entry)
     db.commit()
@@ -191,14 +192,14 @@ def delete_entry(jid: int, db: Session = Depends(get_db), user_id: int = 1):
 
 # Legacy endpoints for backward compatibility
 @router.get("/legacy")
-def list_legacy(db: Session = Depends(get_db)):
+def list_legacy(db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Legacy list endpoint - returns all entries without pagination."""
-    entries = db.query(JournalEntry).order_by(JournalEntry.id.desc()).all()
+    entries = db.query(JournalEntry).filter(JournalEntry.user_id == current_user.id).order_by(JournalEntry.id.desc()).all()
     return [_legacy_to_response(j) for j in entries]
 
 
 @router.post("/legacy")
-def add_legacy(body: JournalIn, db: Session = Depends(get_db)):
+def add_legacy(body: JournalIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Legacy create endpoint."""
     from ..schemas import JournalEntryCreate
     new_body = JournalEntryCreate(
@@ -209,16 +210,16 @@ def add_legacy(body: JournalIn, db: Session = Depends(get_db)):
         recommendation=body.recommendation,
         evidence=body.evidence,
     )
-    return create_entry(new_body, db)
+    return create_entry(new_body, db, current_user)
 
 
 @router.post("/{jid}/review")
-def review(jid: int, body: ReviewIn, db: Session = Depends(get_db), user_id: int = 1):
+def review(jid: int, body: ReviewIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Add or update outcome review for a journal entry."""
     entry = db.get(JournalEntry, jid)
     if not entry:
         raise HTTPException(404, "Entry not found")
-    if entry.user_id != user_id:
+    if entry.user_id != current_user.id:
         raise HTTPException(403, "Not authorized")
     entry.outcome_review = body.outcome_review
     entry.updated_at = datetime.utcnow()

@@ -8,25 +8,18 @@ from ..db import get_db
 from ..models import WatchlistItem, User
 from ..services import market as m
 from ..schemas import WatchlistAdd, WatchlistItemResponse, WatchlistResponse, SymbolInfo
+from ..services.auth import get_current_user_dep
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
-
-
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    """Get the current user (MVP: single seeded user)."""
-    user = db.get(User, 1)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
 
 
 @router.get("", response_model=WatchlistResponse)
 def get_watchlist(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_dep),
 ):
     """Get the current user's watchlist with current prices."""
-    items = db.query(WatchlistItem).filter(WatchlistItem.user_id == user.id).all()
+    items = db.query(WatchlistItem).filter(WatchlistItem.user_id == current_user.id).all()
     
     items_with_price = []
     for item in items:
@@ -54,7 +47,7 @@ def get_watchlist(
 def add_to_watchlist(
     payload: WatchlistAdd,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_dep),
 ):
     """Add a symbol to the user's watchlist."""
     symbol = payload.symbol.upper().replace("/", "-")
@@ -70,7 +63,7 @@ def add_to_watchlist(
     
     # Check if already in watchlist
     existing = db.query(WatchlistItem).filter(
-        WatchlistItem.user_id == user.id,
+        WatchlistItem.user_id == current_user.id,
         WatchlistItem.symbol == symbol
     ).first()
     
@@ -78,7 +71,7 @@ def add_to_watchlist(
         raise HTTPException(status_code=409, detail=f"Symbol {symbol} already in watchlist")
     
     # Create new watchlist item
-    item = WatchlistItem(user_id=user.id, symbol=symbol)
+    item = WatchlistItem(user_id=current_user.id, symbol=symbol)
     db.add(item)
     
     try:
@@ -102,13 +95,13 @@ def add_to_watchlist(
 def remove_from_watchlist(
     symbol: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_dep),
 ):
     """Remove a symbol from the user's watchlist."""
     symbol = symbol.upper().replace("/", "-")
     
     item = db.query(WatchlistItem).filter(
-        WatchlistItem.user_id == user.id,
+        WatchlistItem.user_id == current_user.id,
         WatchlistItem.symbol == symbol
     ).first()
     

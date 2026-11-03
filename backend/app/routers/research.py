@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import ResearchRun, Strategy, Conversation, BacktestRun, PaperDeployment
+from ..models import ResearchRun, Strategy, Conversation, BacktestRun, PaperDeployment, User
 from ..schemas import ResearchRunCreate, ResearchRunResponse, ResearchRunListResponse
 from ..services import research, market, backtest
 from typing import Optional
 from datetime import datetime
+from ..services.auth import get_current_user_dep
 
 router = APIRouter(prefix="/api/research", tags=["research"])
 
@@ -41,10 +42,10 @@ def list_runs(
     conversation_id: Optional[int] = None,
     backtest_run_id: Optional[int] = None,
     deployment_id: Optional[int] = None,
-    user_id: int = 1,  # TODO: replace with actual auth
+    current_user: User = Depends(get_current_user_dep),
 ):
     """List research runs with pagination and filtering."""
-    query = db.query(ResearchRun).filter(ResearchRun.user_id == user_id)
+    query = db.query(ResearchRun).filter(ResearchRun.user_id == current_user.id)
     
     if strategy_id:
         query = query.filter(ResearchRun.strategy_id == strategy_id)
@@ -67,21 +68,21 @@ def list_runs(
 
 
 @router.post("")
-def create_run(body: ResearchRunCreate, db: Session = Depends(get_db), user_id: int = 1):
+def create_run(body: ResearchRunCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Create a new research run with automatic analysis."""
     # Validate references
     if body.strategy_id:
         strategy = db.get(Strategy, body.strategy_id)
         if not strategy:
             raise HTTPException(404, "Strategy not found")
-        if strategy.user_id != 1:
+        if strategy.user_id != current_user.id:
             raise HTTPException(403, "Not authorized")
     
     if body.conversation_id:
         conv = db.get(Conversation, body.conversation_id)
         if not conv:
             raise HTTPException(404, "Conversation not found")
-        if conv.user_id != 1:
+        if conv.user_id != current_user.id:
             raise HTTPException(403, "Not authorized")
     
     if body.backtest_run_id:
@@ -136,7 +137,7 @@ def create_run(body: ResearchRunCreate, db: Session = Depends(get_db), user_id: 
     
     # Create research run record
     run = ResearchRun(
-        user_id=1,  # TODO: replace with actual auth
+        user_id=current_user.id,
         strategy_id=body.strategy_id,
         strategy_version=body.strategy_version,
         conversation_id=body.conversation_id,
@@ -172,12 +173,12 @@ def create_run(body: ResearchRunCreate, db: Session = Depends(get_db), user_id: 
 
 
 @router.get("/{rid}")
-def get_run(rid: int, db: Session = Depends(get_db), user_id: int = 1):
+def get_run(rid: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     """Get a single research run."""
     run = db.get(ResearchRun, rid)
     if not run:
         raise HTTPException(404, "Research run not found")
-    if run.user_id != user_id:
+    if run.user_id != current_user.id:
         raise HTTPException(403, "Not authorized")
     return _to_response(run)
 
@@ -186,13 +187,13 @@ def get_run(rid: int, db: Session = Depends(get_db), user_id: int = 1):
 def create_from_chat(
     conversation_id: int = Query(...),
     db: Session = Depends(get_db),
-    user_id: int = 1,
+    current_user: User = Depends(get_current_user_dep),
 ):
     """Create a research run from the current conversation's draft strategy."""
     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conv:
         raise HTTPException(404, "Conversation not found")
-    if conv.user_id != user_id:
+    if conv.user_id != current_user.id:
         raise HTTPException(403, "Not authorized")
     
     if not conv.draft_spec:
@@ -230,7 +231,7 @@ def create_from_chat(
     if strategy_name:
         strategy = db.query(Strategy).filter(
             Strategy.name == strategy_name,
-            Strategy.user_id == user_id
+            Strategy.user_id == current_user.id
         ).order_by(Strategy.version.desc()).first()
         if strategy:
             strategy_id = strategy.id
@@ -242,7 +243,7 @@ def create_from_chat(
     
     # Create research run
     run = ResearchRun(
-        user_id=user_id,
+        user_id=current_user.id,
         conversation_id=conversation_id,
         strategy_id=strategy_id,
         strategy_version=strategy_version,

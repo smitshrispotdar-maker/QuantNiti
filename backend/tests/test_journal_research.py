@@ -20,21 +20,31 @@ from app.schemas import JournalEntryCreate, JournalEntryUpdate
 class TestJournalRouter:
     """Tests for the journal router endpoints."""
 
-    def test_list_entries_empty(self):
+    @pytest.fixture
+    def mock_current_user(self):
+        """Create a mock current user for testing."""
+        user = MagicMock()
+        user.id = 1
+        user.email = "test@example.com"
+        user.is_active = True
+        user.created_at = datetime.now()
+        return user
+
+    def test_list_entries_empty(self, mock_current_user):
         """Test listing entries when none exist."""
         mock_db = MagicMock()
         mock_db.query.return_value.filter.return_value.count.return_value = 0
         mock_db.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         from app.routers.journal import list_entries
-        result = list_entries(page=1, page_size=20, db=mock_db)
+        result = list_entries(page=1, page_size=20, db=mock_db, current_user=mock_current_user)
 
         assert result.total == 0
         assert result.items == []
         assert result.page == 1
         assert result.page_size == 20
 
-    def test_list_entries_with_data(self):
+    def test_list_entries_with_data(self, mock_current_user):
         """Test listing entries with data."""
         mock_entry = MagicMock()
         mock_entry.id = 1
@@ -66,7 +76,7 @@ class TestJournalRouter:
         mock_db.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [mock_entry]
 
         from app.routers.journal import list_entries
-        result = list_entries(page=1, page_size=20, db=mock_db)
+        result = list_entries(page=1, page_size=20, db=mock_db, current_user=mock_current_user)
 
         assert result.total == 1
         assert len(result.items) == 1
@@ -74,7 +84,7 @@ class TestJournalRouter:
         assert result.items[0].decision_type == "strategy_hypothesis"
         assert result.items[0].status == "draft"
 
-    def test_create_entry_valid(self):
+    def test_create_entry_valid(self, mock_current_user):
         """Test creating a valid journal entry."""
         mock_db = MagicMock()
         mock_strategy = MagicMock()
@@ -98,13 +108,13 @@ class TestJournalRouter:
         # Mock the _to_response function
         with patch('app.routers.journal._to_response') as mock_to_response:
             mock_to_response.return_value = MagicMock()
-            result = create_entry(body, mock_db)
+            result = create_entry(body, mock_db, current_user=mock_current_user)
             
         mock_db.add.assert_called_once()
         mock_db.commit.assert_called_once()
         mock_db.refresh.assert_called_once()
 
-    def test_create_entry_invalid_strategy(self):
+    def test_create_entry_invalid_strategy(self, mock_current_user):
         """Test creating entry with invalid strategy ID."""
         mock_db = MagicMock()
         mock_db.get.return_value = None
@@ -118,12 +128,12 @@ class TestJournalRouter:
 
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as exc_info:
-            create_entry(body, mock_db)
+            create_entry(body, mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 404
         assert "Strategy not found" in str(exc_info.value.detail)
 
-    def test_get_entry(self):
+    def test_get_entry(self, mock_current_user):
         """Test getting a single journal entry."""
         mock_entry = MagicMock()
         mock_entry.id = 1
@@ -156,11 +166,11 @@ class TestJournalRouter:
         from app.routers.journal import _to_response
         with patch('app.routers.journal._to_response') as mock_to_response:
             mock_to_response.return_value = MagicMock()
-            result = get_entry(1, mock_db)
+            result = get_entry(1, mock_db, current_user=mock_current_user)
             
         mock_db.get.assert_called_once_with(JournalEntry, 1)
 
-    def test_get_entry_not_found(self):
+    def test_get_entry_not_found(self, mock_current_user):
         """Test getting non-existent entry."""
         mock_db = MagicMock()
         mock_db.get.return_value = None
@@ -168,12 +178,12 @@ class TestJournalRouter:
         from app.routers.journal import get_entry
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as exc_info:
-            get_entry(999, mock_db)
+            get_entry(999, mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 404
         assert "Entry not found" in str(exc_info.value.detail)
 
-    def test_update_entry(self):
+    def test_update_entry(self, mock_current_user):
         """Test updating a journal entry."""
         mock_entry = MagicMock()
         mock_entry.id = 1
@@ -194,13 +204,13 @@ class TestJournalRouter:
         
         with patch('app.routers.journal._to_response') as mock_to_response:
             mock_to_response.return_value = MagicMock()
-            result = update_entry(1, body, mock_db)
+            result = update_entry(1, body, mock_db, current_user=mock_current_user)
             
         assert mock_entry.title == "New Title"
         assert mock_entry.hypothesis_rationale == "New rationale"
         mock_db.commit.assert_called_once()
 
-    def test_delete_entry(self):
+    def test_delete_entry(self, mock_current_user):
         """Test deleting a journal entry."""
         mock_entry = MagicMock()
         mock_entry.id = 1
@@ -210,13 +220,13 @@ class TestJournalRouter:
         mock_db.get.return_value = mock_entry
 
         from app.routers.journal import delete_entry
-        result = delete_entry(1, mock_db)
+        result = delete_entry(1, mock_db, current_user=mock_current_user)
         
         assert result == {"deleted": True, "id": 1}
         mock_db.delete.assert_called_once_with(mock_entry)
         mock_db.commit.assert_called_once()
 
-    def test_legacy_list(self):
+    def test_legacy_list(self, mock_current_user):
         """Test legacy list endpoint."""
         mock_entry = MagicMock()
         mock_entry.id = 1
@@ -228,15 +238,15 @@ class TestJournalRouter:
         mock_entry.created_at = datetime.now()
         
         mock_db = MagicMock()
-        mock_db.query.return_value.order_by.return_value.all.return_value = [mock_entry]
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [mock_entry]
 
         from app.routers.journal import list_legacy
-        result = list_legacy(mock_db)
+        result = list_legacy(mock_db, current_user=mock_current_user)
         
         assert len(result) == 1
         assert result[0]["id"] == 1
 
-    def test_add_legacy(self):
+    def test_add_legacy(self, mock_current_user):
         """Test legacy add endpoint."""
         mock_db = MagicMock()
         mock_strategy = MagicMock()
@@ -255,7 +265,7 @@ class TestJournalRouter:
         
         with patch('app.routers.journal.create_entry') as mock_create:
             mock_create.return_value = MagicMock()
-            result = add_legacy(body, mock_db)
+            result = add_legacy(body, mock_db, current_user=mock_current_user)
             
         mock_create.assert_called_once()
 
@@ -263,21 +273,31 @@ class TestJournalRouter:
 class TestResearchRouter:
     """Tests for the Research router endpoints."""
 
-    def test_list_runs_empty(self):
+    @pytest.fixture
+    def mock_current_user(self):
+        """Create a mock current user for testing."""
+        user = MagicMock()
+        user.id = 1
+        user.email = "test@example.com"
+        user.is_active = True
+        user.created_at = datetime.now()
+        return user
+
+    def test_list_runs_empty(self, mock_current_user):
         """Test listing runs when none exist."""
         mock_db = MagicMock()
         mock_db.query.return_value.filter.return_value.count.return_value = 0
         mock_db.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         from app.routers.research import list_runs
-        result = list_runs(page=1, page_size=20, db=mock_db)
+        result = list_runs(page=1, page_size=20, db=mock_db, current_user=mock_current_user)
 
         assert result.total == 0
         assert result.items == []
         assert result.page == 1
         assert result.page_size == 20
 
-    def test_list_runs_with_data(self):
+    def test_list_runs_with_data(self, mock_current_user):
         """Test listing runs with data."""
         mock_run = MagicMock()
         mock_run.id = 1
@@ -303,14 +323,14 @@ class TestResearchRouter:
         mock_db.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [mock_run]
 
         from app.routers.research import list_runs
-        result = list_runs(page=1, page_size=20, db=mock_db)
+        result = list_runs(page=1, page_size=20, db=mock_db, current_user=mock_current_user)
 
         assert result.total == 1
         assert len(result.items) == 1
         assert result.items[0].id == 1
         assert result.items[0].is_simulated is True
 
-    def test_get_run(self):
+    def test_get_run(self, mock_current_user):
         """Test getting a single research run."""
         mock_run = MagicMock()
         mock_run.id = 1
@@ -338,11 +358,11 @@ class TestResearchRouter:
         from app.routers.research import _to_response
         with patch('app.routers.research._to_response') as mock_to_response:
             mock_to_response.return_value = MagicMock()
-            result = get_run(1, mock_db)
+            result = get_run(1, mock_db, current_user=mock_current_user)
             
         mock_db.get.assert_called_once_with(ResearchRun, 1)
 
-    def test_get_run_not_found(self):
+    def test_get_run_not_found(self, mock_current_user):
         """Test getting non-existent research run."""
         mock_db = MagicMock()
         mock_db.get.return_value = None
@@ -350,7 +370,7 @@ class TestResearchRouter:
         from app.routers.research import get_run
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as exc_info:
-            get_run(999, mock_db)
+            get_run(999, mock_db, current_user=mock_current_user)
         
         assert exc_info.value.status_code == 404
         assert "Research run not found" in str(exc_info.value.detail)
