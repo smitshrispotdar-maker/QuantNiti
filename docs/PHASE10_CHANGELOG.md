@@ -86,3 +86,96 @@ Manual verification confirmed:
 2. Add user_id column to PaperAccount model (new migration)
 4. Begin implementing authentication system to replace hardcoded user_id=1
 5. Add database indexes for foreign key columns
+
+---
+
+## Stage 1A.1: Chat-Triggered Research Snapshot Persistence Fix
+
+### Date
+2026-11-03
+
+### Commit
+`faabe5a` (after Stage 1A fix)
+
+### Original Bug
+
+The `create_from_chat` endpoint in `backend/app/routers/research.py` had the same snapshot persistence bug as the `create_run` endpoint. When creating a research run from a conversation (triggered via the Conversational AI Studio), the endpoint was not:
+
+1. Persisting `backtest_metrics_snapshot` when a backtest reference existed in the conversation
+2. Setting `strategy_id` and `strategy_version` when a matching saved strategy was found
+3. Properly handling the `backtest_refs` from the conversation's draft_spec
+
+This caused chat-triggered research runs to lack proper linkage to their source strategy and backtest, and missing metrics snapshots.
+
+### Root Cause
+
+In the `create_from_chat` function (lines 185-251), the code:
+- Did not fetch backtest metrics when `backtest_run_id` was available from `conv.draft_spec["backtest_refs"]`
+- Did not attempt to find a matching saved strategy by name to populate `strategy_id` and `strategy_version`
+- Did not set `backtest_metrics_snapshot` at all in the ResearchRun creation
+
+### Fix Implemented
+
+**File Modified:** `backend/app/routers/research.py`
+
+**Changes in `create_from_chat` function:**
+1. Added fetching of backtest metrics when `backtest_run_id` is available from `conv.draft_spec["backtest_refs"]`
+2. Added lookup of matching saved strategy by name to populate `strategy_id` and `strategy_version`
+3. Added `backtest_metrics_snapshot` to the ResearchRun creation
+4. Added `strategy_id` and `strategy_version` to the ResearchRun creation
+6. Changed `db.get()` to `db.query().filter().first()` for fresh database reads to avoid stale object issues
+
+### Behavior Changes
+
+**Before Fix:**
+- Chat-triggered research runs had no `backtest_metrics_snapshot`
+- `strategy_id` and `strategy_version` were always `null`
+- `backtest_run_id` was not set even when `backtest_refs` existed in conversation
+- Missing linkage between chat-triggered research and source strategy/backtest
+
+**After Fix:**
+- Chat-triggered research runs persist `backtest_metrics_snapshot` when backtest reference exists
+- `strategy_id` and `strategy_version` are populated when a matching saved strategy is found
+- `backtest_run_id` is correctly set from conversation's `backtest_refs`
+- Full linkage between chat-triggered research and source strategy/backtest
+- Snapshots are immutable - editing original strategy/backtest doesn't change existing snapshots
+
+### Testing
+
+All existing tests pass:
+- Backend: 294 passed, 1 skipped
+- Frontend: 16 passed
+- Production build: Successful
+
+Comprehensive regression tests confirmed:
+1. ✅ Standard research creation with a strategy (strategy snapshot persisted)
+2. ✅ Standard research creation with a backtest (both snapshots persisted)
+3. ✅ Chat-triggered research with a strategy (strategy snapshot + strategy_id/version)
+4. ✅ Chat-triggered research with a backtest (both snapshots + backtest_run_id)
+5. ✅ Chat-triggered with both linked records (all fields populated)
+6. ✅ Missing optional references handled gracefully (null where appropriate)
+7. ✅ Strategy modification after research creation - snapshot immutable
+8. ✅ Backtest modification after research creation - snapshot immutable
+9. ✅ Research retrieval returns original snapshots
+
+All tests pass:
+- Backend: 294 passed, 1 skipped
+- Frontend: 16 passed
+- Production build: Successful
+
+### Files Modified
+
+- `backend/app/routers/research.py` - Fixed snapshot persistence in `create_from_chat` function
+
+### Remaining Limitations
+
+1. **PaperAccount still lacks user_id column** - Still needs migration for proper ownership
+2. **Hardcoded user_id=1** - Still present in 20+ locations across routers
+3. **Research comparison creates persistent ResearchRun** - Should use separate table
+4. **No authentication system** - Still using hardcoded user_id=1
+
+### Next Steps (Stage 1B)
+
+1. Add user_id column to PaperAccount model (new migration)
+2. Begin implementing authentication system to replace hardcoded user_id=1
+3. Add database indexes for foreign key columns

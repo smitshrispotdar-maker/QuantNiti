@@ -189,7 +189,7 @@ def create_from_chat(
     user_id: int = 1,
 ):
     """Create a research run from the current conversation's draft strategy."""
-    conv = db.get(Conversation, conversation_id)
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conv:
         raise HTTPException(404, "Conversation not found")
     if conv.user_id != user_id:
@@ -211,10 +211,30 @@ def create_from_chat(
     # Determine if we have a backtest or deployment to link
     backtest_run_id = None
     deployment_id = None
-    if "backtest_refs" in conv.draft_spec and conv.draft_spec["backtest_refs"]:
+    backtest_metrics = None
+    strategy_id = None
+    strategy_version = None
+    
+    if conv.draft_spec and "backtest_refs" in conv.draft_spec and conv.draft_spec["backtest_refs"]:
         backtest_run_id = conv.draft_spec["backtest_refs"][-1]["id"]
-    if "deployment_refs" in conv.draft_spec and conv.draft_spec["deployment_refs"]:
+        # Fetch backtest metrics for snapshot
+        backtest_run = db.get(BacktestRun, backtest_run_id)
+        if backtest_run:
+            backtest_metrics = backtest_run.metrics
+    
+    if conv.draft_spec and "deployment_refs" in conv.draft_spec and conv.draft_spec["deployment_refs"]:
         deployment_id = conv.draft_spec["deployment_refs"][-1]["id"]
+    
+    # Try to find a matching saved strategy by name and spec
+    strategy_name = spec.get("name")
+    if strategy_name:
+        strategy = db.query(Strategy).filter(
+            Strategy.name == strategy_name,
+            Strategy.user_id == user_id
+        ).order_by(Strategy.version.desc()).first()
+        if strategy:
+            strategy_id = strategy.id
+            strategy_version = strategy.version
     
     # Run research
     research_result = research.run(df)
@@ -222,11 +242,14 @@ def create_from_chat(
     
     # Create research run
     run = ResearchRun(
-        user_id=1,
+        user_id=user_id,
         conversation_id=conversation_id,
+        strategy_id=strategy_id,
+        strategy_version=strategy_version,
         backtest_run_id=backtest_run_id,
         deployment_id=deployment_id,
         strategy_spec_snapshot=spec,
+        backtest_metrics_snapshot=backtest_metrics,
         facts=research_result.get("facts"),
         interpretations=research_result.get("interpretations"),
         label=research_result.get("label", "AI-GENERATED INTERPRETATION · PAPER/SIMULATED"),
@@ -239,13 +262,14 @@ def create_from_chat(
     db.refresh(run)
     
     # Add research reference to conversation
-    if "research_refs" not in conv.draft_spec:
-        conv.draft_spec["research_refs"] = []
-    conv.draft_spec["research_refs"].append({
-        "id": run.id,
-        "timestamp": datetime.utcnow().isoformat(),
-        "summary": f"Research completed for {symbol} {timeframe}"
-    })
-    db.commit()
+    if conv.draft_spec is not None:
+        if "research_refs" not in conv.draft_spec:
+            conv.draft_spec["research_refs"] = []
+        conv.draft_spec["research_refs"].append({
+            "id": run.id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "summary": f"Research completed for {symbol} {timeframe}"
+        })
+        db.commit()
     
     return _to_response(run)
