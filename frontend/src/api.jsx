@@ -18,7 +18,11 @@ export function ErrorBox({ err }) {
 
 // Watchlist API helpers
 export const watchlistApi = {
-  get: () => api("/api/watchlist"),
+  get: async () => {
+    const data = await api("/api/watchlist");
+    // Handle both array response and { items: [] } response
+    return Array.isArray(data) ? data : (data.items || []);
+  },
   add: (symbol) => api("/api/watchlist", { method: "POST", body: { symbol } }),
   remove: (symbol) => api(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
   symbols: () => api("/api/watchlist/symbols"),

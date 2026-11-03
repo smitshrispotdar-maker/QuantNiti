@@ -35,13 +35,15 @@ def get_watchlist(
             price = round(df.close.iloc[-1], 2)
             change_pct = round((df.close.iloc[-1] / df.close.iloc[-2] - 1) * 100, 2)
         except Exception:
-            price = 0.0
-            change_pct = 0.0
+            price = None
+            change_pct = None
         
         items_with_price.append(WatchlistItemResponse(
             id=item.id,
             symbol=item.symbol,
             name=m.SYMBOL_NAMES.get(item.symbol, item.symbol),
+            price=price,
+            change_pct=change_pct,
             created_at=item.created_at,
         ))
     
@@ -90,6 +92,8 @@ def add_to_watchlist(
         id=item.id,
         symbol=item.symbol,
         name=m.SYMBOL_NAMES.get(item.symbol, item.symbol),
+        price=None,
+        change_pct=None,
         created_at=item.created_at,
     )
 

@@ -279,3 +279,84 @@ class ResearchRunListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# Market Data Schemas
+class MarketMeta(BaseModel):
+    symbol: str
+    name: str
+    timeframe: str
+    source: str
+    status: str
+    last_bar: Optional[str] = None
+    fetched_at: str
+    label: str
+    exchange_timezone: str
+    data_quality: Dict[str, Any] = {}
+
+
+class MarketBarRow(BaseModel):
+    ts: str
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    volume: Optional[float] = None
+    sma20: Optional[float] = None
+    ema20: Optional[float] = None
+    ema50: Optional[float] = None
+    rsi: Optional[float] = None
+    macd: Optional[float] = None
+    macd_signal: Optional[float] = None
+    macd_hist: Optional[float] = None
+    bb_upper: Optional[float] = None
+    bb_lower: Optional[float] = None
+    range: Optional[List[float]] = None
+
+
+class MarketBarsResponse(BaseModel):
+    meta: MarketMeta
+    bars: List[MarketBarRow]
+
+
+# Market Watchlist Item (for /api/market/watchlist endpoint)
+class WatchlistItem(BaseModel):
+    symbol: str
+    name: str
+    timeframe: str
+    source: str
+    status: str
+    last_bar: Optional[str] = None
+    fetched_at: str
+    label: str
+    exchange_timezone: str
+    data_quality: Dict[str, Any]
+    price: Optional[float] = None
+    change_pct: Optional[float] = None
+
+
+class SymbolInfo(BaseModel):
+    symbol: str
+    name: str
+    timezone: str
+
+
+# Personal Watchlist Schemas
+class WatchlistAdd(BaseModel):
+    symbol: str
+
+
+class WatchlistItemResponse(BaseModel):
+    id: int
+    symbol: str
+    name: str
+    price: Optional[float] = None
+    change_pct: Optional[float] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WatchlistResponse(BaseModel):
+    items: List[WatchlistItemResponse]

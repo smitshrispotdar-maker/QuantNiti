@@ -55,11 +55,19 @@ def _mock(symbol: str, tf: str, n: int) -> pd.DataFrame:
 
 
 def _validate_ohlc(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-    """Validate and fix OHLC consistency. Returns (cleaned_df, issues_list)."""
+    """Validate OHLC consistency. Returns (cleaned_df, issues_list).
+    
+    Rows with invalid OHLC values (zero, negative, NaN, or infinite) are removed.
+    OHLC relationships (high >= max(open,close), low <= min(open,close), high >= low)
+    are validated and rows violating these are removed.
+    """
     issues = []
     df = df.copy()
     
-    # Ensure high >= max(open, close) and low <= min(open, close)
+    # Track original row count
+    original_rows = len(df)
+    
+    # First, ensure high >= max(open, close) and low <= min(open, close)
     high_fixed = df["high"].where(df["high"] >= df[["open", "close"]].max(axis=1), df[["open", "close"]].max(axis=1))
     low_fixed = df["low"].where(df["low"] <= df[["open", "close"]].min(axis=1), df[["open", "close"]].min(axis=1))
     
@@ -77,16 +85,68 @@ def _validate_ohlc(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
         df["low"] = df[["high", "low"]].min(axis=1)
         issues.append("Fixed high < low on some rows")
     
-    # Ensure positive prices
+    # Identify rows with invalid OHLC values
+    # Valid OHLC must be: finite, strictly positive
+    invalid_mask = pd.Series(False, index=df.index)
+    
     for col in ["open", "high", "low", "close"]:
+        # Check for NaN values
+        if df[col].isna().any():
+            issues.append(f"NaN {col} values found")
+            invalid_mask |= df[col].isna()
+        
+        # Check for infinite values
+        if np.isinf(df[col]).any():
+            if (df[col] == np.inf).any():
+                issues.append(f"Positive infinite {col} values found")
+            if (df[col] == -np.inf).any():
+                issues.append(f"Negative infinite {col} values found")
+            invalid_mask |= np.isinf(df[col])
+        
+        # Check for non-positive values (zero or negative)
         if (df[col] <= 0).any():
             issues.append(f"Non-positive {col} values found")
-            df[col] = df[col].clip(lower=1e-8)
+            invalid_mask |= (df[col] <= 0)
     
-    # Volume non-negative
+    # Remove rows with invalid OHLC values
+    if invalid_mask.any():
+        removed_count = invalid_mask.sum()
+        issues.append(f"Removed {removed_count} row(s) with invalid OHLC values")
+        df = df[~invalid_mask].copy()
+    
+    # Validate OHLC relationships on remaining data
+    # High must be >= max(open, close)
+    invalid_high = df["high"] < df[["open", "close"]].max(axis=1)
+    if invalid_high.any():
+        removed_count = invalid_high.sum()
+        issues.append(f"Removed {removed_count} row(s) where high < max(open, close)")
+        df = df[~invalid_high].copy()
+    
+    # Low must be <= min(open, close)
+    invalid_low = df["low"] > df[["open", "close"]].min(axis=1)
+    if invalid_low.any():
+        removed_count = invalid_low.sum()
+        issues.append(f"Removed {removed_count} row(s) where low > min(open, close)")
+        df = df[~invalid_low].copy()
+    
+    # High must be >= low
+    invalid_hl = df["high"] < df["low"]
+    if invalid_hl.any():
+        removed_count = invalid_hl.sum()
+        issues.append(f"Removed {removed_count} row(s) where high < low")
+        df = df[~invalid_hl].copy()
+    
+    # Volume non-negative - remove rows with negative volume
     if "volume" in df.columns and (df["volume"] < 0).any():
-        issues.append("Negative volume values found")
-        df["volume"] = df["volume"].clip(lower=0)
+        neg_vol = df["volume"] < 0
+        removed_count = neg_vol.sum()
+        issues.append(f"Removed {removed_count} row(s) with negative volume")
+        df = df[~neg_vol].copy()
+    
+    # Report total rows removed
+    total_removed = original_rows - len(df)
+    if total_removed > 0:
+        issues.append(f"Total rows removed: {total_removed} out of {original_rows}")
     
     return df, issues
 

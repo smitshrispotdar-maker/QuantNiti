@@ -248,7 +248,7 @@ class TestDataQuality:
         assert (df_clean["high"] >= df_clean["low"]).all()
     
     def test_ohlc_validation_positive_prices(self):
-        """Test that _validate_ohlc fixes non-positive prices."""
+        """Test that _validate_ohlc removes rows with non-positive prices."""
         from app.services.market import _validate_ohlc
         import pandas as pd
         
@@ -263,6 +263,8 @@ class TestDataQuality:
         df_clean, issues = _validate_ohlc(df)
         
         assert any("Non-positive" in issue for issue in issues)
+        assert any("Removed" in issue for issue in issues)
+        assert len(df_clean) == 2  # One row removed
         assert (df_clean["open"] > 0).all()
     
     def test_gap_detection(self):
