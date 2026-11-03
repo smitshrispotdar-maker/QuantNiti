@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, String
 from typing import List, Optional
 from datetime import datetime
 from ..db import get_db
@@ -757,7 +757,7 @@ def search_conversations(
     
     if query:
         # Simple text search in messages
-        query_obj = query_obj.filter(Conversation.messages.op('::text').ilike(f"%{query}%"))
+        query_obj = query_obj.filter(Conversation.messages.cast(String).ilike(f"%{query}%"))
     
     if date_from:
         query_obj = query_obj.filter(Conversation.updated_at >= date_from)
@@ -768,15 +768,13 @@ def search_conversations(
     conversations = query_obj.order_by(desc(Conversation.updated_at)).offset(offset).limit(limit).all()
     
     return ConversationSearchResult(
-        items=[{
+        conversations=[{
             "id": c.id,
             "title": c.messages[0]["text"][:50] if c.messages else "Empty",
             "message_count": len(c.messages),
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
         } for c in conversations],
-        total=total,
-        page=(offset // limit) + 1,
-        page_size=limit
+        total=total
     )
 
 

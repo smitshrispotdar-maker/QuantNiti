@@ -1,7 +1,7 @@
 """Phase 7: Enhanced JournalEntry and ResearchRun models
 
 Revision ID: 0003_phase7_journal_research
-Revises: 0002_watchlist_items
+Revises: 0002
 Create Date: 2024-11-03
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision = '0003_phase7_journal_research'
-down_revision = '0002_watchlist_items'
+down_revision = '0002'
 branch_labels = None
 depends_on = None
 
@@ -27,13 +27,13 @@ def upgrade() -> None:
         sa.Column('conversation_id', sa.Integer(), sa.ForeignKey('conversations.id'), nullable=True),
         sa.Column('backtest_run_id', sa.Integer(), sa.ForeignKey('backtest_runs.id'), nullable=True),
         sa.Column('deployment_id', sa.Integer(), sa.ForeignKey('paper_deployments.id'), nullable=True),
-        sa.Column('strategy_spec_snapshot', sa.JSONB(), nullable=True),
-        sa.Column('backtest_metrics_snapshot', sa.JSONB(), nullable=True),
-        sa.Column('facts', sa.JSONB(), nullable=True),
-        sa.Column('interpretations', sa.JSONB(), nullable=True),
+        sa.Column('strategy_spec_snapshot', JSONB(), nullable=True),
+        sa.Column('backtest_metrics_snapshot', JSONB(), nullable=True),
+        sa.Column('facts', JSONB(), nullable=True),
+        sa.Column('interpretations', JSONB(), nullable=True),
         sa.Column('label', sa.String(), nullable=True),
         sa.Column('data_source', sa.String(), nullable=True),
-        sa.Column('data_quality', sa.JSONB(), nullable=True),
+        sa.Column('data_quality', JSONB(), nullable=True),
         sa.Column('is_simulated', sa.Boolean(), default=False),
         sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),

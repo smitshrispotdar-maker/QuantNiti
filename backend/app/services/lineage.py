@@ -136,8 +136,9 @@ def build_lineage(
     ).order_by(BacktestRun.created_at).all() if strategy else []
     
     for bt in backtests:
-        if bt.strategy_id and bt.user_id == user_id:
-            continue  # Filter by user if needed
+        # Filter by user via strategy
+        if strategy and strategy.user_id != user_id:
+            continue
         metrics = bt.metrics or {}
         events.append(LineageEvent(
             event_type="backtest",
@@ -221,13 +222,14 @@ def build_lineage(
     # 6. Paper Deployment Events
     deployments = db.query(PaperDeployment).order_by(PaperDeployment.activated_at).all()
     for dep in deployments:
-        if dep.account_id:
-            from ..models import PaperAccount
-            account = db.get(PaperAccount, dep.account_id)
-            if account and account.user_id != user_id:
-                continue
-        elif strategy_id and dep.strategy_id != strategy_id:
+        # Filter by strategy if specified
+        if strategy_id and dep.strategy_id != strategy_id:
             continue
+        # Filter by user via strategy
+        if dep.strategy_id:
+            strat = db.get(Strategy, dep.strategy_id)
+            if strat and strat.user_id != user_id:
+                continue
             
         events.append(LineageEvent(
             event_type="deployment",

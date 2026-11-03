@@ -205,6 +205,16 @@ class JournalEntryResponse(BaseModel):
     status: Optional[str] = None
     strategy_id: Optional[int] = None
     strategy_version: Optional[int] = None
+    conversation_id: Optional[int] = None
+    backtest_run_id: Optional[int] = None
+    research_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
+    hypothesis_rationale: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    risks_assumptions: Optional[str] = None
+    decision_next_steps: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    actual_outcome: Optional[str] = None
     recommendation: str
     evidence: dict = {}
     outcome_review: Optional[str] = None
