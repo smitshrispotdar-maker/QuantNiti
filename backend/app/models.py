@@ -37,6 +37,7 @@ class PaperAccount(Base):
     id = Column(Integer, primary_key=True); name = Column(String); starting_cash = Column(Float); cash = Column(Float)
     status = Column(String, default="RUNNING")  # RUNNING | PAUSED | STOPPED | KILLED
     strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=True); created_at = Column(DateTime, default=now)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
 class PaperDeployment(Base):
     __tablename__ = "paper_deployments"
