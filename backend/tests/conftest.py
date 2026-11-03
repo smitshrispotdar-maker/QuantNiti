@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # Set test environment BEFORE importing app
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["SECRET_KEY"] = "test-secret-key-for-testing-only"
 os.environ["CORS_ORIGINS"] = "http://localhost:5173"
 

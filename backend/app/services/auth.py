@@ -30,12 +30,6 @@ class AuthError(Exception):
         super().__init__(self.message)
 
 
-def get_settings_cached():
-    """Get settings with caching."""
-    from app.config import get_settings
-    return get_settings()
-
-
 def hash_password(password: str) -> str:
     """Hash a password using Argon2id."""
     return ph.hash(password)
@@ -60,7 +54,7 @@ def validate_password_strength(password: str) -> None:
 
 def create_access_token(user_id: int, expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token."""
-    settings = get_settings_cached()
+    settings = get_settings()
     secret = settings.JWT_SECRET_KEY
     if not secret or len(secret) < 32:
         raise RuntimeError("JWT_SECRET_KEY must be at least 32 characters")
@@ -74,7 +68,7 @@ def create_access_token(user_id: int, expires_delta: timedelta | None = None) ->
 
 def decode_token(token: str) -> Optional[int]:
     """Decode and validate a JWT token, returning user_id if valid."""
-    settings = get_settings_cached()
+    settings = get_settings()
     secret = settings.JWT_SECRET_KEY
     if not secret:
         raise AuthError("JWT secret not configured")
@@ -85,7 +79,11 @@ def decode_token(token: str) -> Optional[int]:
         if user_id_str is None:
             raise AuthError("Invalid token: missing subject")
         return int(user_id_str)
-    except JWTError:
+    except JWTError as e:
+        # Log the specific error category for debugging (without token)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"JWT validation failed: {type(e).__name__}")
         raise AuthError("Invalid or expired token")
 
 
@@ -186,17 +184,6 @@ def get_current_user_safe_dep(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-
-def get_current_user(db: Session, token: str) -> User:
-    """Get the current user from a JWT token. Returns SQLAlchemy User model."""
-    user_id = decode_token(token)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise AuthError("User not found")
-    if not user.is_active:
-        raise AuthError("Account is disabled")
-    return user
 
 
 def user_to_safe_response(user: User) -> UserResponseSafe:
