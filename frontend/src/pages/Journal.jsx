@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api, fmt, ErrorBox } from "../api.jsx";
 import StrategyLineage from "../components/lineage/StrategyLineage";
+import ExportDialog from "../components/export/ExportDialog";
 
 const DECISION_TYPES = [
   "strategy_hypothesis", "research_finding", "backtest_review", "risk_review",
@@ -164,13 +165,18 @@ export default function Journal({ saved }) {
     return <span className={`badge ${colors[status] || "text-slate-400 border-line"} text-[10px]`}>{status}</span>;
   };
 
+  const [showExport, setShowExport] = useState(false);
+
   return (
     <div className="max-w-5xl">
       <div className="flex justify-between items-center mb-3">
         <h2 className="text-lg font-semibold">Decision Journal</h2>
-        <button className="btn btn-ai" onClick={() => { resetForm(); setShowForm(true); }}>
-          + New Entry
-        </button>
+        <div className="flex gap-2">
+          <button className="btn btn-ai" onClick={() => { resetForm(); setShowForm(true); }}>
+            + New Entry
+          </button>
+          <button className="btn" onClick={() => setShowExport(true)}>Export</button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -495,6 +501,13 @@ export default function Journal({ saved }) {
           </div>
         </>
       )}
+
+      {/* Export Dialog */}
+      <ExportDialog
+        isOpen={showExport}
+        onClose={() => setShowExport(false)}
+        defaultSelection={{ journal_entry_ids: rows.map(r => r.id) }}
+      />
     </div>
   );
 }

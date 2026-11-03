@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import List, Optional
@@ -13,6 +13,14 @@ from ..schemas import (
 )
 from ..services import nlp, backtest, market, validation, paper, research
 from datetime import datetime
+import base64
+from io import BytesIO
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.colors import HexColor
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
 @router.get("")
@@ -372,6 +380,311 @@ def compare_research(body: ResearchComparisonRequest, db: Session = Depends(get_
     )
 
 
+def generate_pdf_export(data: dict, body: ExportRequest) -> str:
+    """Generate a PDF report from the export data."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=50, leftMargin=50, topMargin=50, bottomMargin=50)
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Title'],
+        fontSize=24,
+        textColor=HexColor('#1E3A5F'),
+        spaceAfter=6,
+        alignment=TA_CENTER,
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor=HexColor('#666666'),
+        spaceAfter=20,
+        alignment=TA_CENTER,
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=14,
+        textColor=HexColor('#1E3A5F'),
+        spaceBefore=16,
+        spaceAfter=8,
+        borderWidth=0,
+        borderPadding=0,
+    )
+    
+    subheading_style = ParagraphStyle(
+        'CustomSubheading',
+        parent=styles['Heading3'],
+        fontSize=11,
+        textColor=HexColor('#333333'),
+        spaceBefore=10,
+        spaceAfter=4,
+    )
+    
+    body_style = ParagraphStyle(
+        'CustomBody',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=HexColor('#333333'),
+        spaceAfter=3,
+        leading=12,
+    )
+    
+    mono_style = ParagraphStyle(
+        'CustomMono',
+        parent=styles['Code'],
+        fontSize=8,
+        textColor=HexColor('#333333'),
+        fontName='Courier',
+        spaceAfter=2,
+        leading=10,
+    )
+    
+    elements = []
+    
+    # Title page
+    elements.append(Paragraph("QuantNiti Export Report", title_style))
+    elements.append(Paragraph(
+        f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+        subtitle_style
+    ))
+    elements.append(Paragraph(
+        "PAPER/SIMULATED · NO REAL MONEY",
+        ParagraphStyle('Disclaimer', parent=subtitle_style, textColor=HexColor('#AA0000'), fontSize=10)
+    ))
+    elements.append(Spacer(1, 30))
+    
+    # Table of contents
+    elements.append(Paragraph("Contents", heading_style))
+    toc_items = []
+    if data.get("journal"): toc_items.append("Journal Entries")
+    if data.get("strategies"): toc_items.append("Strategies")
+    if data.get("backtests"): toc_items.append("Backtest Runs")
+    if data.get("research"): toc_items.append("Research Runs")
+    
+    for item in toc_items:
+        elements.append(Paragraph(f"• {item}", body_style))
+    
+    elements.append(PageBreak())
+    
+    # Journal Entries
+    if data.get("journal"):
+        elements.append(Paragraph("Journal Entries", heading_style))
+        for entry in data["journal"]:
+            elements.append(Paragraph(f"Entry #{entry['id']}", subheading_style))
+            
+            entry_data = [
+                ["Field", "Value"],
+                ["Strategy ID", str(entry.get('strategy_id', '—'))],
+                ["Strategy Version", str(entry.get('strategy_version', '—'))],
+                ["Created", entry.get('created_at', '—')],
+                ["Recommendation", entry.get('recommendation', '—') or '—'],
+                ["Outcome Review", entry.get('outcome_review', '—') or '—'],
+            ]
+            
+            if entry.get('evidence'):
+                entry_data.append(["Evidence", str(entry['evidence'])[:200] + ("..." if len(str(entry['evidence'])) > 200 else "")])
+            
+            table = Table(entry_data, colWidths=[1.5*inch, 4.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1E3A5F')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('TOPPADDING', (0, 0), (-1, 0), 8),
+                ('BACKGROUND', (0, 1), (-1, -1), HexColor('#F8F9FA')),
+                ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#DDDDDD')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 12))
+    
+    # Strategies
+    if data.get("strategies"):
+        elements.append(Paragraph("Strategies", heading_style))
+        for strategy in data["strategies"]:
+            elements.append(Paragraph(f"{strategy['name']} v{strategy['version']} (ID: {strategy['id']})", subheading_style))
+            elements.append(Paragraph(f"Created: {strategy.get('created_at', '—')}", body_style))
+            
+            spec = strategy.get('spec', {})
+            if spec:
+                elements.append(Paragraph("Strategy Specification", ParagraphStyle('SpecHead', parent=body_style, fontSize=10, textColor=HexColor('#1E3A5F'), spaceBefore=6)))
+                
+                # Key spec fields
+                spec_fields = [
+                    ("Instruments", ", ".join(spec.get('instruments', [])) or '—'),
+                    ("Timeframe", spec.get('timeframe', '—')),
+                    ("Indicators", str(len(spec.get('indicators', [])))),
+                    ("Entry Rules", str(len(spec.get('entry_rules', [])))),
+                    ("Exit Rules", str(len(spec.get('exit_rules', [])))),
+                ]
+                
+                risk = spec.get('risk', {})
+                if risk:
+                    spec_fields.extend([
+                        ("Max Position %", str(risk.get('max_position_pct', '—'))),
+                        ("Stop Loss %", str(risk.get('stop_loss_pct', '—'))),
+                        ("Take Profit %", str(risk.get('take_profit_pct', '—'))),
+                        ("Max Drawdown %", str(risk.get('max_drawdown_pct', '—'))),
+                    ])
+                
+                spec_data = [["Parameter", "Value"]] + spec_fields
+                table = Table(spec_data, colWidths=[1.5*inch, 4.5*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1E3A5F')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                    ('TOPPADDING', (0, 0), (-1, 0), 6),
+                    ('BACKGROUND', (0, 1), (-1, -1), HexColor('#F8F9FA')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#DDDDDD')),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+                ]))
+                elements.append(table)
+            elements.append(Spacer(1, 12))
+    
+    # Backtest Runs
+    if data.get("backtests"):
+        elements.append(Paragraph("Backtest Runs", heading_style))
+        for bt in data["backtests"]:
+            elements.append(Paragraph(f"Backtest Run #{bt['id']}", subheading_style))
+            
+            metrics = bt.get('metrics', {})
+            validation_result = bt.get('validation', {})
+            
+            bt_data = [
+                ["Metric", "Value"],
+                ["Strategy ID", str(bt.get('strategy_id', '—'))],
+                ["Strategy Version", str(bt.get('strategy_version', '—'))],
+                ["Created", bt.get('created_at', '—')],
+                ["Data Source", bt.get('data_source', '—')],
+                ["Validation", "PASSED" if validation_result.get('passed') else "FAILED"],
+            ]
+            
+            if metrics:
+                metric_fields = [
+                    ("Total Return %", f"{metrics.get('total_return_pct', 0):.2f}%"),
+                    ("Max Drawdown %", f"{metrics.get('max_drawdown_pct', 0):.2f}%"),
+                    ("Sharpe Ratio", f"{metrics.get('sharpe', 0):.2f}"),
+                    ("Win Rate %", f"{metrics.get('win_rate_pct', 0):.2f}%"),
+                    ("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}"),
+                    ("Total Trades", str(metrics.get('trades', 0))),
+                    ("Avg Trade %", f"{metrics.get('avg_trade_pct', 0):.2f}%"),
+                ]
+                bt_data.extend(metric_fields)
+            
+            table = Table(bt_data, colWidths=[1.5*inch, 4.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1E3A5F')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
+                ('BACKGROUND', (0, 1), (-1, -1), HexColor('#F8F9FA')),
+                ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#DDDDDD')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 12))
+    
+    # Research Runs
+    if data.get("research"):
+        elements.append(Paragraph("Research Runs", heading_style))
+        for research in data["research"]:
+            elements.append(Paragraph(f"Research Run #{research['id']}", subheading_style))
+            
+            r_data = [
+                ["Field", "Value"],
+                ["Strategy ID", str(research.get('strategy_id', '—'))],
+                ["Conversation ID", str(research.get('conversation_id', '—'))],
+                ["Created", research.get('created_at', '—')],
+                ["Label", research.get('label', '—') or '—'],
+                ["Data Source", research.get('data_source', '—') or '—'],
+                ["Simulated", "Yes" if research.get('is_simulated') else "No"],
+            ]
+            
+            table = Table(r_data, colWidths=[1.5*inch, 4.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1E3A5F')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
+                ('BACKGROUND', (0, 1), (-1, -1), HexColor('#F8F9FA')),
+                ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#DDDDDD')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ]))
+            elements.append(table)
+            
+            # Facts
+            facts = research.get('facts', {})
+            if facts:
+                elements.append(Paragraph("Key Facts", ParagraphStyle('FactsHead', parent=body_style, fontSize=10, textColor=HexColor('#1E3A5F'), spaceBefore=8)))
+                facts_data = [["Metric", "Value"]]
+                for k, v in facts.items():
+                    facts_data.append([k.replace('_', ' ').title(), str(v)])
+                table = Table(facts_data, colWidths=[2*inch, 4*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), HexColor('#1E3A5F')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#FFFFFF')),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                    ('TOPPADDING', (0, 0), (-1, 0), 5),
+                    ('BACKGROUND', (0, 1), (-1, -1), HexColor('#F8F9FA')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#DDDDDD')),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+                ]))
+                elements.append(table)
+            
+            # Interpretations
+            interpretations = research.get('interpretations', {})
+            if interpretations:
+                elements.append(Paragraph("Interpretations", ParagraphStyle('InterpHead', parent=body_style, fontSize=10, textColor=HexColor('#1E3A5F'), spaceBefore=8)))
+                for key, value in interpretations.items():
+                    if isinstance(value, list):
+                        if value:
+                            elements.append(Paragraph(f"<b>{key.replace('_', ' ').title()}:</b>", body_style))
+                            for item in value:
+                                elements.append(Paragraph(f"• {item}", ParagraphStyle('Bullet', parent=body_style, leftIndent=20)))
+                    elif isinstance(value, str) and value:
+                        elements.append(Paragraph(f"<b>{key.replace('_', ' ').title()}:</b> {value}", body_style))
+            
+            elements.append(Spacer(1, 12))
+    
+    # Footer
+    elements.append(Spacer(1, 30))
+    elements.append(Paragraph(
+        "— End of Report —",
+        ParagraphStyle('Footer', parent=body_style, alignment=TA_CENTER, textColor=HexColor('#999999'))
+    ))
+    elements.append(Paragraph(
+        "QuantNiti · Paper/Simulated Trading Platform · No Real Money Involved",
+        ParagraphStyle('Footer2', parent=body_style, alignment=TA_CENTER, textColor=HexColor('#999999'), fontSize=8)
+    ))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    pdf_bytes = buffer.read()
+    buffer.close()
+    
+    return base64.b64encode(pdf_bytes).decode('utf-8')
+
+
 # --- Export ---
 
 @router.post("/export")
@@ -423,8 +736,9 @@ def export_data(body: ExportRequest, db: Session = Depends(get_db)):
                 lines.append("")
         return {"markdown": "\n".join(lines)}
     else:
-        # PDF export would require additional library
-        raise HTTPException(501, "PDF export not yet implemented")
+        # PDF export using reportlab
+        pdf_base64 = generate_pdf_export(data, body)
+        return {"pdf_base64": pdf_base64, "filename": f"quantniti-export-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.pdf"}
 
 
 # --- Conversation Search ---

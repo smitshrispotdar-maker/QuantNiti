@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { api, ErrorBox, Badge } from "../api.jsx";
 import StrategyLineage from "../components/lineage/StrategyLineage";
+import ExportDialog from "../components/export/ExportDialog";
 
 export default function Studio({ setDraft, draft, setSaved, saved }) {
   const [cid, setCid] = useState(null);
@@ -12,6 +13,13 @@ export default function Studio({ setDraft, draft, setSaved, saved }) {
   const [showConvs, setShowConvs] = useState(false);
   const [newConvTitle, setNewConvTitle] = useState("");
   const [renamingCid, setRenamingCid] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [showExport, setShowExport] = useState(false);
 
   // Load conversations on mount
   useEffect(() => {
@@ -182,6 +190,29 @@ export default function Studio({ setDraft, draft, setSaved, saved }) {
     }
   };
 
+  // Conversation Search
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearchLoading(true);
+    try {
+      const data = await api(`/api/strategies/conversations/search?query=${encodeURIComponent(searchQuery)}&limit=20&offset=${(searchPage - 1) * 20}`);
+      setSearchResults(data.items || data.conversations || []);
+      setSearchTotal(data.total || 0);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      setSearchPage(1);
+      handleSearch();
+    }
+  };
+
   // Format conversation title for display
   const getConvTitle = (c) => {
     if (c.title) return c.title;
@@ -211,6 +242,62 @@ export default function Studio({ setDraft, draft, setSaved, saved }) {
           <span className="text-xs text-ai font-medium">CONVERSATIONS</span>
           <button className="md:hidden text-slate-400" onClick={() => setShowConvs(false)}>×</button>
         </div>
+        
+        {/* Search Bar */}
+        <div className="p-2">
+          <div className="relative">
+            <input
+              type="text"
+              className="w-full bg-ink border border-line rounded px-2 py-1 text-sm pr-8"
+              placeholder="Search conversations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+            />
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-ai"
+              onClick={() => { setSearchPage(1); handleSearch(); }}
+            >
+              🔍
+            </button>
+          </div>
+          {showSearch && searchQuery && (
+            <div className="mt-2 max-h-40 overflow-auto border border-line rounded bg-ink">
+              {searchLoading ? (
+                <div className="p-2 text-center text-slate-400 text-sm">Searching...</div>
+              ) : searchResults.length === 0 ? (
+                <div className="p-2 text-center text-slate-500 text-sm">No results found</div>
+              ) : (
+                <>
+                  {searchResults.map((c) => (
+                    <div
+                      key={c.id}
+                      className={`px-2 py-1.5 text-sm cursor-pointer transition-colors hover:bg-line ${
+                        cid === c.id ? "bg-ai/10 text-ai" : "text-slate-400"
+                      }`}
+                      onClick={() => { loadConversation(c.id); setShowSearch(false); setSearchQuery(""); }}
+                    >
+                      <div className="truncate font-medium">{c.title || getConvTitle({ messages: [{ role: "user", text: c.title || "" }] })}</div>
+                      <div className="text-[10px] text-slate-500">{c.message_count} msgs · {formatTime(c.updated_at)}</div>
+                    </div>
+                  ))}
+                  {searchTotal > searchResults.length && (
+                    <div className="flex justify-center gap-1 p-2">
+                      {searchPage > 1 && (
+                        <button className="btn text-xs" onClick={() => setSearchPage(searchPage - 1)}>Prev</button>
+                      )}
+                      <span className="text-xs text-slate-400 self-center">Page {searchPage}</span>
+                      {searchPage * 20 < searchTotal && (
+                        <button className="btn text-xs" onClick={() => setSearchPage(searchPage + 1)}>Next</button>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
         <button className="btn btn-ai w-full mx-2 mb-2 text-xs" onClick={newConversation}>
           + New Conversation
         </button>
@@ -326,6 +413,9 @@ export default function Studio({ setDraft, draft, setSaved, saved }) {
           <button className="btn" onClick={saveStrategy} disabled={!draft || loading}>
             💾 Save Strategy
           </button>
+          <button className="btn" onClick={() => setShowExport(true)}>
+            📤 Export
+          </button>
         </div>
       </div>
 
@@ -358,6 +448,18 @@ export default function Studio({ setDraft, draft, setSaved, saved }) {
           </div>
         )}
       </div>
+
+      {/* Export Dialog */}
+      <ExportDialog
+        isOpen={showExport}
+        onClose={() => setShowExport(false)}
+        defaultSelection={{
+          strategy_ids: saved ? [saved.id] : [],
+          journal_entry_ids: [],
+          backtest_run_ids: [],
+          research_run_ids: [],
+        }}
+      />
     </div>
   );
 }

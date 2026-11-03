@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { api, fmt, Badge, ErrorBox } from "../api.jsx";
 import StrategyLineage from "../components/lineage/StrategyLineage";
+import ResearchComparison from "../components/research/ResearchComparison";
+import ExportDialog from "../components/export/ExportDialog";
 
 export default function Research() {
   const [runs, setRuns] = useState([]);
@@ -25,6 +27,18 @@ export default function Research() {
   });
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedRunDetail, setSelectedRunDetail] = useState(null);
+  const [showComparison, setShowComparison] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleConfig, setScheduleConfig] = useState({
+    enabled: false,
+    cron_schedule: "0 6 * * *",
+    strategies: [],
+    symbols: [],
+    timeframes: [],
+    max_runs_per_day: 5,
+  });
+  const [scheduleLoading, setScheduleLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -45,6 +59,19 @@ export default function Research() {
   };
 
   useEffect(() => { load(); }, [page, filters]);
+
+  // Load schedule config on mount
+  useEffect(() => {
+    const loadSchedule = async () => {
+      try {
+        const data = await api("/api/strategies/research/schedule");
+        setScheduleConfig(data);
+      } catch (e) {
+        console.error("Failed to load schedule:", e);
+      }
+    };
+    loadSchedule();
+  }, []);
 
   const handleNewResearch = async (e) => {
     e.preventDefault();
@@ -68,6 +95,21 @@ export default function Research() {
 
   const handleView = (run) => {
     setSelectedRunDetail(run);
+  };
+
+  const handleSaveSchedule = async () => {
+    setScheduleLoading(true);
+    try {
+      await api("/api/strategies/research/schedule", {
+        method: "POST",
+        body: scheduleConfig,
+      });
+      setShowSchedule(false);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setScheduleLoading(false);
+    }
   };
 
   const StatusBadge = ({ simulated }) => (
@@ -186,6 +228,9 @@ export default function Research() {
         <h2 className="text-lg font-semibold">Research Runs</h2>
         <div className="flex gap-2">
           <button className="btn btn-ai" onClick={() => setShowNewForm(true)}>+ New Research</button>
+          <button className="btn" onClick={() => setShowComparison(true)}>Compare Runs</button>
+          <button className="btn" onClick={() => setShowExport(true)}>Export</button>
+          <button className="btn" onClick={() => setShowSchedule(true)}>Schedule</button>
           <button className="btn" onClick={() => setShowNewForm(false)}>Cancel</button>
         </div>
       </div>
@@ -334,6 +379,128 @@ export default function Research() {
             {page * 20 < total && <button className="btn" onClick={() => setPage(page + 1)}>Next</button>}
           </div>
         </>
+      )}
+
+      {/* Research Comparison Modal */}
+      {showComparison && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-panel border border-line rounded-lg w-full max-w-4xl max-h-[90vh] overflow-auto">
+            <div className="flex items-center justify-between p-4 border-b border-line">
+              <h2 className="text-lg font-semibold">Research Comparison</h2>
+              <button className="text-slate-400 hover:text-slate-200 text-xl" onClick={() => setShowComparison(false)}>×</button>
+            </div>
+            <div className="p-4">
+              <ResearchComparison />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Dialog */}
+      <ExportDialog
+        isOpen={showExport}
+        onClose={() => setShowExport(false)}
+        defaultSelection={{ research_run_ids: runs.map(r => r.id) }}
+      />
+
+      {/* Scheduled Research Modal */}
+      {showSchedule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-panel border border-line rounded-lg w-full max-w-md max-h-[90vh] overflow-auto">
+            <div className="flex items-center justify-between p-4 border-b border-line">
+              <h2 className="text-lg font-semibold">Scheduled Research Configuration</h2>
+              <button className="text-slate-400 hover:text-slate-200 text-xl" onClick={() => setShowSchedule(false)}>×</button>
+            </div>
+            <div className="p-4 space-y-4">
+              <ErrorBox err={err} />
+              
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-ai"
+                    checked={scheduleConfig.enabled}
+                    onChange={(e) => setScheduleConfig({ ...scheduleConfig, enabled: e.target.checked })}
+                  />
+                  <span className="font-medium">Enable Scheduled Research</span>
+                </label>
+                <p className="text-xs text-slate-500 mt-1">
+                  When enabled, research runs will be automatically executed on the configured schedule.
+                  Note: This requires a backend scheduler service to be running.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Cron Schedule</label>
+                <input
+                  type="text"
+                  className="w-full bg-ink border border-line rounded px-2 py-1 text-sm font-mono"
+                  value={scheduleConfig.cron_schedule}
+                  onChange={(e) => setScheduleConfig({ ...scheduleConfig, cron_schedule: e.target.value })}
+                  placeholder="0 6 * * * (daily at 6 AM)"
+                />
+                <p className="text-xs text-slate-500 mt-1">Standard cron expression (minute hour day month weekday)</p>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Strategy IDs (comma-separated)</label>
+                <input
+                  type="text"
+                  className="w-full bg-ink border border-line rounded px-2 py-1 text-sm"
+                  value={scheduleConfig.strategies.join(",")}
+                  onChange={(e) => setScheduleConfig({ ...scheduleConfig, strategies: e.target.value.split(",").map(s => parseInt(s.trim())).filter(s => !isNaN(s)) })}
+                  placeholder="1,2,3"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Symbols (comma-separated)</label>
+                <input
+                  type="text"
+                  className="w-full bg-ink border border-line rounded px-2 py-1 text-sm"
+                  value={scheduleConfig.symbols.join(",")}
+                  onChange={(e) => setScheduleConfig({ ...scheduleConfig, symbols: e.target.value.split(",").map(s => s.trim().toUpperCase()).filter(Boolean) })}
+                  placeholder="BTC-USD,ETH-USD"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Timeframes (comma-separated)</label>
+                <input
+                  type="text"
+                  className="w-full bg-ink border border-line rounded px-2 py-1 text-sm"
+                  value={scheduleConfig.timeframes.join(",")}
+                  onChange={(e) => setScheduleConfig({ ...scheduleConfig, timeframes: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })}
+                  placeholder="1d,1h"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Max Runs Per Day</label>
+                <input
+                  type="number"
+                  className="w-full bg-ink border border-line rounded px-2 py-1 text-sm"
+                  value={scheduleConfig.max_runs_per_day}
+                  onChange={(e) => setScheduleConfig({ ...scheduleConfig, max_runs_per_day: parseInt(e.target.value) || 5 })}
+                  min="1"
+                  max="50"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-line">
+                <button className="btn btn-ai flex-1" onClick={handleSaveSchedule} disabled={scheduleLoading}>
+                  {scheduleLoading ? "Saving..." : "Save Configuration"}
+                </button>
+                <button className="btn flex-1" onClick={() => setShowSchedule(false)}>Cancel</button>
+              </div>
+
+              <div className="text-xs text-slate-500 border-t border-line pt-3">
+                <p className="font-medium mb-1">Note:</p>
+                <p>The current backend only stores the configuration. Automatic execution requires a separate scheduler service (e.g., APScheduler, Celery Beat, or cron) to be implemented and deployed. This UI configures the schedule parameters for when such a service is available.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
