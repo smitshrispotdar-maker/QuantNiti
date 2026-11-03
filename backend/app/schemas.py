@@ -360,3 +360,45 @@ class WatchlistItemResponse(BaseModel):
 
 class WatchlistResponse(BaseModel):
     items: List[WatchlistItemResponse]
+
+
+# Authentication Schemas
+class UserRegister(BaseModel):
+    email: str
+    password: str = Field(min_length=12, max_length=128)
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserResponseSafe(BaseModel):
+    """Safe user response without sensitive fields."""
+    id: int
+    email: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"

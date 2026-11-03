@@ -5,7 +5,11 @@ from .db import Base
 now = datetime.utcnow
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True); email = Column(String, unique=True); created_at = Column(DateTime, default=now)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, unique=True, nullable=False)
+    hashed_password = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=now)
 class Conversation(Base):
     __tablename__ = "conversations"
     id = Column(Integer, primary_key=True); user_id = Column(Integer, ForeignKey("users.id"))
