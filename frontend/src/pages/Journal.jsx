@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, fmt, ErrorBox } from "../api.jsx";
+import StrategyLineage from "../components/lineage/StrategyLineage";
 
 const DECISION_TYPES = [
   "strategy_hypothesis", "research_finding", "backtest_review", "risk_review",
@@ -201,6 +202,13 @@ export default function Journal({ saved }) {
           </select>
         </div>
       </div>
+
+      {/* Strategy Lineage for selected strategy */}
+      {filters.strategy_id && (
+        <div className="mb-3">
+          <StrategyLineage strategyId={parseInt(filters.strategy_id)} />
+        </div>
+      )}
 
       {showForm && (
         <div className="card p-3 mb-3">

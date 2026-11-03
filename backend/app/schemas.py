@@ -1,5 +1,6 @@
 """Canonical Strategy Schema v1.0 — the single contract shared by chat studio, visual builder, backtester and paper engine."""
 from datetime import datetime
+from enum import Enum
 from typing import Literal, Union, Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
@@ -36,66 +37,64 @@ class StrategySpec(BaseModel):
     def up(cls, v): return [s.upper() for s in v]
 
 
-# Market Data Schemas
-class DataQuality(BaseModel):
-    issues: List[str] = []
-    gaps: List[str] = []
-    duplicates: List[str] = []
-    bar_count: int = 0
-    cached: bool = False
-    cache_age_seconds: Optional[float] = None
-
-class MarketMeta(BaseModel):
-    symbol: str
-    name: str
-    timeframe: str
-    source: str
-    status: str
-    last_bar: Optional[str] = None
-    fetched_at: str
-    label: str = "PAPER/SIMULATED"
-    exchange_timezone: str = "UTC"
-    data_quality: DataQuality
-
-class MarketBarRow(BaseModel):
-    ts: str
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
-    volume: Optional[float] = None
-    sma20: Optional[float] = None
-    ema20: Optional[float] = None
-    ema50: Optional[float] = None
-    rsi: Optional[float] = None
-    macd: Optional[float] = None
-    macd_signal: Optional[float] = None
-    macd_hist: Optional[float] = None
-    bb_upper: Optional[float] = None
-    bb_lower: Optional[float] = None
-
-class MarketBarsResponse(BaseModel):
-    meta: MarketMeta
-    bars: List[MarketBarRow]
-
-class WatchlistItem(BaseModel):
-    symbol: str
-    name: str
-    timeframe: str
-    source: str
-    status: str
-    last_bar: str
-    fetched_at: str
-    label: str
-    price: float
-    change_pct: float
-
-class SymbolInfo(BaseModel):
-    symbol: str
-    name: str
-    timezone: str
+# Strategy Versioning & Diff Schemas
+class StrategyVersionInfo(BaseModel):
+    version: int
+    spec: StrategySpec
+    created_at: datetime
+    description: Optional[str] = None
 
 
+class StrategyDiff(BaseModel):
+    strategy_id: int
+    from_version: int
+    to_version: int
+    diff_summary: Dict[str, Any]
+    created_at: datetime
+
+
+# Research Comparison Schemas
+class ResearchComparisonRequest(BaseModel):
+    run_ids: List[int] = Field(min_length=2, max_length=5)
+
+
+class ResearchComparisonResponse(BaseModel):
+    runs: List[Dict[str, Any]]
+    comparison: Dict[str, Any]
+
+
+# Export Schemas
+class ExportFormat(str, Enum):
+    JSON = "json"
+    MARKDOWN = "markdown"
+    PDF = "pdf"
+
+
+class ExportRequest(BaseModel):
+    format: ExportFormat
+    journal_entry_ids: Optional[List[int]] = None
+    strategy_ids: Optional[List[int]] = None
+    backtest_run_ids: Optional[List[int]] = None
+    research_run_ids: Optional[List[int]] = None
+    date_range_start: Optional[datetime] = None
+    date_range_end: Optional[datetime] = None
+
+
+# Conversation Search Schemas
+class ConversationSearchRequest(BaseModel):
+    query: str
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+
+
+class ConversationSearchResult(BaseModel):
+    conversations: List[Dict[str, Any]]
+    total: int
+
+
+# API Request Schemas
 class ChatIn(BaseModel):
     conversation_id: Optional[int] = None
     message: str
@@ -109,8 +108,8 @@ class BacktestIn(BaseModel):
     initial_cash: float = Field(default=100_000, gt=0)
     transaction_cost_bps: float = Field(default=0, ge=0, le=1000)
     slippage_bps: float = Field(default=0, ge=0, le=1000)
-    start_date: Optional[str] = None  # ISO format
-    end_date: Optional[str] = None    # ISO format
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 class OrderIn(BaseModel):
     symbol: str
@@ -133,29 +132,21 @@ class ReviewIn(BaseModel):
     outcome_review: str
 
 
-# Journal Schemas
-DECISION_TYPES = (
-    "strategy_hypothesis", "research_finding", "backtest_review", "risk_review",
-    "strategy_approval", "strategy_rejection", "strategy_modification",
-    "paper_trading_review", "general_note"
-)
-
-JOURNAL_STATUSES = ("draft", "under_review", "approved", "rejected", "superseded", "completed")
-
-
-class JournalIn(BaseModel):
-    strategy_id: Optional[int] = None
-    recommendation: str
-    evidence: dict = {}
-
-
+# Journal Entry Schemas
 class JournalEntryCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    decision_type: Literal[DECISION_TYPES] = "general_note"
-    status: Literal[JOURNAL_STATUSES] = "draft"
     strategy_id: Optional[int] = None
-    strategy_version: Optional[int] = None
     conversation_id: Optional[int] = None
+    title: Optional[str] = None
+    decision_type: Optional[str] = None
+    status: Optional[str] = None
+    recommendation: Optional[str] = None
+    evidence: dict = {}
+    hypothesis_rationale: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    risks_assumptions: Optional[str] = None
+    decision_next_steps: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    actual_outcome: Optional[str] = None
     backtest_run_id: Optional[int] = None
     research_run_id: Optional[int] = None
     deployment_id: Optional[int] = None
@@ -165,48 +156,58 @@ class JournalEntryCreate(BaseModel):
     decision_next_steps: Optional[str] = None
     expected_outcome: Optional[str] = None
     actual_outcome: Optional[str] = None
-    recommendation: Optional[str] = None
-    evidence: Optional[dict] = None
-
-
-class JournalEntryUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    decision_type: Optional[Literal[DECISION_TYPES]] = None
-    status: Optional[Literal[JOURNAL_STATUSES]] = None
+    backtest_run_id: Optional[int] = None
+    research_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
     hypothesis_rationale: Optional[str] = None
     evidence_summary: Optional[str] = None
     risks_assumptions: Optional[str] = None
     decision_next_steps: Optional[str] = None
     expected_outcome: Optional[str] = None
     actual_outcome: Optional[str] = None
+    backtest_run_id: Optional[int] = None
+    research_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
+    evidence: dict = {}
+    strategy_version: Optional[int] = None
+
+class JournalEntryUpdate(BaseModel):
+    title: Optional[str] = None
+    decision_type: Optional[str] = None
+    status: Optional[str] = None
     recommendation: Optional[str] = None
     evidence: Optional[dict] = None
+    hypothesis_rationale: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    risks_assumptions: Optional[str] = None
+    decision_next_steps: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    actual_outcome: Optional[str] = None
+    backtest_run_id: Optional[int] = None
+    research_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
+    hypothesis_rationale: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    risks_assumptions: Optional[str] = None
+    decision_next_steps: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    actual_outcome: Optional[str] = None
+    backtest_run_id: Optional[int] = None
+    research_run_id: Optional[int] = None
+    deployment_id: Optional[int] = None
     outcome_review: Optional[str] = None
 
 
 class JournalEntryResponse(BaseModel):
     id: int
-    user_id: int
-    title: str
-    decision_type: str
-    status: str
+    title: Optional[str] = None
     strategy_id: Optional[int] = None
     strategy_version: Optional[int] = None
-    conversation_id: Optional[int] = None
-    backtest_run_id: Optional[int] = None
-    research_run_id: Optional[int] = None
-    deployment_id: Optional[int] = None
-    hypothesis_rationale: Optional[str] = None
-    evidence_summary: Optional[str] = None
-    risks_assumptions: Optional[str] = None
-    decision_next_steps: Optional[str] = None
-    expected_outcome: Optional[str] = None
-    actual_outcome: Optional[str] = None
-    recommendation: Optional[str] = None
-    evidence: Optional[dict] = None
+    recommendation: str
+    evidence: dict = {}
     outcome_review: Optional[str] = None
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -219,7 +220,30 @@ class JournalEntryListResponse(BaseModel):
     page_size: int
 
 
-# Research Run Schemas
+class JournalEntryResponse(BaseModel):
+    id: int
+    strategy_id: Optional[int] = None
+    strategy_version: Optional[int] = None
+    recommendation: str
+    evidence: dict = {}
+    outcome_review: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Scheduled Research Schemas
+class ScheduledResearchConfig(BaseModel):
+    enabled: bool = False
+    cron_schedule: str = "0 6 * * *"  # Daily at 6 AM
+    strategies: List[int] = Field(default_factory=list)
+    symbols: List[str] = Field(default_factory=list)
+    timeframes: List[str] = Field(default_factory=list)
+    max_runs_per_day: int = 5
+
+
+# Research Schemas
 class ResearchRunCreate(BaseModel):
     strategy_id: Optional[int] = None
     strategy_version: Optional[int] = None
@@ -228,6 +252,7 @@ class ResearchRunCreate(BaseModel):
     deployment_id: Optional[int] = None
     strategy_spec_snapshot: Optional[dict] = None
     backtest_metrics_snapshot: Optional[dict] = None
+    label: Optional[str] = None
 
 
 class ResearchRunResponse(BaseModel):
@@ -248,9 +273,6 @@ class ResearchRunResponse(BaseModel):
     is_simulated: bool = False
     created_at: datetime
     updated_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 
 class ResearchRunListResponse(BaseModel):
@@ -258,21 +280,3 @@ class ResearchRunListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-
-
-class WatchlistAdd(BaseModel):
-    symbol: str = Field(min_length=1, max_length=20)
-
-
-class WatchlistItemResponse(BaseModel):
-    id: int
-    symbol: str
-    name: str
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-
-class WatchlistResponse(BaseModel):
-    items: List[WatchlistItemResponse]

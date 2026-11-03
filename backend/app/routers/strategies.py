@@ -1,9 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
+from typing import List, Optional
+from datetime import datetime
 from ..db import get_db
-from ..models import Strategy, Conversation, ResearchRun
-from ..schemas import StrategyIn, StrategySpec, ChatIn
-from ..services import nlp, backtest, market, validation, paper
+from ..models import Strategy, Conversation, ResearchRun, BacktestRun, JournalEntry
+from ..schemas import (
+    StrategyIn, StrategySpec, ChatIn, StrategyVersionInfo, StrategyDiff,
+    ResearchComparisonRequest, ResearchComparisonResponse,
+    ExportFormat, ExportRequest, ConversationSearchRequest, ConversationSearchResult,
+    ScheduledResearchConfig
+)
+from ..services import nlp, backtest, market, validation, paper, research
+from datetime import datetime
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
 @router.get("")
@@ -268,3 +277,205 @@ def _explain_strategy(spec: StrategySpec, user_message: str) -> str:
     if spec.risk.max_position_pct:
         parts.append(f"Position size: {spec.risk.max_position_pct}%")
     return "Current strategy: " + "; ".join(parts) + "."
+
+
+# --- Strategy Versioning & Diff ---
+
+@router.get("/{sid}/versions")
+def list_versions(sid: int, db: Session = Depends(get_db)):
+    """List all versions of a strategy."""
+    strategy = db.get(Strategy, sid)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+    versions = db.query(Strategy).filter(Strategy.name == strategy.name).order_by(Strategy.version).all()
+    return [{"id": v.id, "version": v.version, "created_at": v.created_at.isoformat()} for v in versions]
+
+
+@router.get("/{sid}/diff")
+def diff_versions(sid: int, from_version: int = Query(...), to_version: int = Query(...), db: Session = Depends(get_db)):
+    """Compare two versions of a strategy."""
+    strategy = db.get(Strategy, sid)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+    
+    v_from = db.query(Strategy).filter(Strategy.name == strategy.name, Strategy.version == from_version).first()
+    v_to = db.query(Strategy).filter(Strategy.name == strategy.name, Strategy.version == to_version).first()
+    
+    if not v_from or not v_to:
+        raise HTTPException(404, "One or both versions not found")
+    
+    spec_from = v_from.spec
+    spec_to = v_to.spec
+    
+    # Simple diff - in production, use a proper diff library
+    diff = {
+        "strategy_name": strategy.name,
+        "from_version": from_version,
+        "to_version": to_version,
+        "changes": {},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Compare key fields
+    for key in ["instruments", "timeframe", "indicators", "entry_rules", "exit_rules", "risk"]:
+        val_from = spec_from.get(key)
+        val_to = spec_to.get(key)
+        if val_from != val_to:
+            diff["changes"][key] = {"from": val_from, "to": val_to}
+    
+    return diff
+
+
+# --- Research Comparison ---
+
+@router.post("/research/compare")
+def compare_research(body: ResearchComparisonRequest, db: Session = Depends(get_db)):
+    """Compare multiple research runs."""
+    if len(body.run_ids) < 2:
+        raise HTTPException(400, "At least 2 run IDs required")
+    if len(body.run_ids) > 5:
+        raise HTTPException(400, "Maximum 5 runs for comparison")
+    
+    runs = db.query(ResearchRun).filter(ResearchRun.id.in_(body.run_ids)).all()
+    if len(runs) != len(body.run_ids):
+        raise HTTPException(404, "One or more research runs not found")
+    
+    # Run comparison
+    comparison = research.compare_runs(runs)
+    
+    # Store comparison result
+    comparison_run = ResearchRun(
+        strategy_id=runs[0].strategy_id if runs[0].strategy_id else None,
+        conversation_id=None,
+        backtest_run_id=None,
+        deployment_id=None,
+        strategy_spec_snapshot={},
+        backtest_metrics_snapshot={},
+        facts={},
+        interpretations={"comparison": comparison},
+        label="COMPARISON",
+        data_source="COMPARISON",
+        is_simulated=True,
+    )
+    db.add(comparison_run)
+    db.commit()
+    db.refresh(comparison_run)
+    
+    return ResearchComparisonResponse(
+        runs=[{
+            "id": r.id,
+            "strategy_id": r.strategy_id,
+            "created_at": r.created_at.isoformat(),
+            "label": r.label
+        } for r in runs],
+        comparison=comparison
+    )
+
+
+# --- Export ---
+
+@router.post("/export")
+def export_data(body: ExportRequest, db: Session = Depends(get_db)):
+    """Export journal entries, strategies, backtests, or research runs."""
+    data = {}
+    
+    if body.journal_entry_ids:
+        entries = db.query(JournalEntry).filter(JournalEntry.id.in_(body.journal_entry_ids)).all()
+        data["journal"] = [{
+            "id": e.id, "strategy_id": e.strategy_id, "strategy_version": e.strategy_version,
+            "recommendation": e.recommendation, "evidence": e.evidence,
+            "outcome_review": e.outcome_review, "created_at": e.created_at.isoformat()
+        } for e in entries]
+    
+    if body.strategy_ids:
+        strategies = db.query(Strategy).filter(Strategy.id.in_(body.strategy_ids)).all()
+        data["strategies"] = [{
+            "id": s.id, "name": s.name, "version": s.version, "spec": s.spec, "created_at": s.created_at.isoformat()
+        } for s in strategies]
+    
+    if body.backtest_run_ids:
+        runs = db.query(BacktestRun).filter(BacktestRun.id.in_(body.backtest_run_ids)).all()
+        data["backtests"] = [{
+            "id": r.id, "strategy_id": r.strategy_id, "strategy_version": r.strategy_version,
+            "metrics": r.metrics, "trades": r.trades, "validation": r.validation,
+            "created_at": r.created_at.isoformat()
+        } for r in runs]
+    
+    if body.research_run_ids:
+        runs = db.query(ResearchRun).filter(ResearchRun.id.in_(body.research_run_ids)).all()
+        data["research"] = [{
+            "id": r.id, "strategy_id": r.strategy_id, "conversation_id": r.conversation_id,
+            "facts": r.facts, "interpretations": r.interpretations, "label": r.label,
+            "data_source": r.data_source, "is_simulated": r.is_simulated, "created_at": r.created_at.isoformat()
+        } for r in runs]
+    
+    # Format output
+    if body.format == ExportFormat.JSON:
+        return data
+    elif body.format == ExportFormat.MARKDOWN:
+        # Simple markdown export
+        lines = ["# QuantNiti Export", f"Generated: {datetime.utcnow().isoformat()}", ""]
+        for key, items in data.items():
+            if items:
+                lines.append(f"## {key.title()}")
+                for item in items:
+                    lines.append(f"- {item}")
+                lines.append("")
+        return {"markdown": "\n".join(lines)}
+    else:
+        # PDF export would require additional library
+        raise HTTPException(501, "PDF export not yet implemented")
+
+
+# --- Conversation Search ---
+
+@router.get("/conversations/search")
+def search_conversations(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    db: Session = Depends(get_db)
+):
+    """Search conversations by content."""
+    query_obj = db.query(Conversation).filter(Conversation.user_id == 1)
+    
+    if query:
+        # Simple text search in messages
+        query_obj = query_obj.filter(Conversation.messages.op('::text').ilike(f"%{query}%"))
+    
+    if date_from:
+        query_obj = query_obj.filter(Conversation.updated_at >= date_from)
+    if date_to:
+        query_obj = query_obj.filter(Conversation.updated_at <= date_to)
+    
+    total = query_obj.count()
+    conversations = query_obj.order_by(desc(Conversation.updated_at)).offset(offset).limit(limit).all()
+    
+    return ConversationSearchResult(
+        items=[{
+            "id": c.id,
+            "title": c.messages[0]["text"][:50] if c.messages else "Empty",
+            "message_count": len(c.messages),
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        } for c in conversations],
+        total=total,
+        page=(offset // limit) + 1,
+        page_size=limit
+    )
+
+
+# --- Scheduled Research Configuration ---
+
+@router.get("/research/schedule")
+def get_research_schedule(db: Session = Depends(get_db)):
+    """Get scheduled research configuration."""
+    # In a real implementation, this would come from a config table
+    return ScheduledResearchConfig()
+
+@router.post("/research/schedule")
+def update_research_schedule(config: ScheduledResearchConfig, db: Session = Depends(get_db)):
+    """Update scheduled research configuration."""
+    # In a real implementation, this would save to a config table
+    return {"status": "updated", "config": config}

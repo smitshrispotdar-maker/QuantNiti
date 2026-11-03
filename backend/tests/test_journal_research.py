@@ -3,6 +3,16 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 
+class MockJournalEntry:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+class MockJournalEntry:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
 from app.models import JournalEntry, Strategy, Conversation, BacktestRun, PaperDeployment, ResearchRun
 from app.schemas import JournalEntryCreate, JournalEntryUpdate
 
@@ -47,6 +57,7 @@ class TestJournalRouter:
         mock_entry.recommendation = "Buy"
         mock_entry.evidence = {"key": "value"}
         mock_entry.outcome_review = None
+        mock_entry.title = "Test Entry"
         mock_entry.created_at = datetime.now()
         mock_entry.updated_at = datetime.now()
 

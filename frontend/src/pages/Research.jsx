@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, fmt, Badge, ErrorBox } from "../api.jsx";
+import StrategyLineage from "../components/lineage/StrategyLineage";
 
 export default function Research() {
   const [runs, setRuns] = useState([]);
@@ -286,6 +287,13 @@ export default function Research() {
           </select>
         </div>
       </div>
+
+      {/* Strategy Lineage for selected strategy */}
+      {filters.strategy_id && (
+        <div className="mb-3">
+          <StrategyLineage strategyId={parseInt(filters.strategy_id)} />
+        </div>
+      )}
 
       {loading && runs.length === 0 && <div className="text-center py-8 text-slate-500">Loading...</div>}
 

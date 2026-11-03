@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { api, ErrorBox, Badge } from "../api.jsx";
+import StrategyLineage from "../components/lineage/StrategyLineage";
 
 export default function Studio({ setDraft, draft, setSaved, saved }) {
   const [cid, setCid] = useState(null);
@@ -342,6 +343,20 @@ export default function Studio({ setDraft, draft, setSaved, saved }) {
             Save Strategy {saved ? `v${saved.version}` : ""}
           </button>
         </div>
+
+        {/* Strategy Lineage */}
+        {saved && (
+          <div className="border-t border-line">
+            <details className="p-2">
+              <summary className="text-xs text-ai font-medium cursor-pointer hover:text-ai/70">
+                Strategy Lineage ({saved.id})
+              </summary>
+              <div className="mt-2">
+                <StrategyLineage strategyId={saved.id} />
+              </div>
+            </details>
+          </div>
+        )}
       </div>
     </div>
   );
