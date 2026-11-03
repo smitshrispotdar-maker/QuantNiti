@@ -201,6 +201,8 @@ class JournalEntryUpdate(BaseModel):
 class JournalEntryResponse(BaseModel):
     id: int
     title: Optional[str] = None
+    decision_type: Optional[str] = None
+    status: Optional[str] = None
     strategy_id: Optional[int] = None
     strategy_version: Optional[int] = None
     recommendation: str
@@ -218,19 +220,6 @@ class JournalEntryListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-
-
-class JournalEntryResponse(BaseModel):
-    id: int
-    strategy_id: Optional[int] = None
-    strategy_version: Optional[int] = None
-    recommendation: str
-    evidence: dict = {}
-    outcome_review: Optional[str] = None
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 
 # Scheduled Research Schemas

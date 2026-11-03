@@ -46,10 +46,10 @@ const getEventLink = (event) => {
       return `/paper?deployment=${event.entity_id}`;
     default:
       return null;
-  }
+  };
 };
 
-function formatDetails(event) {
+const formatDetails = (event) => {
   const d = event.details;
   const parts = [];
 
@@ -69,7 +69,6 @@ function formatDetails(event) {
 };
 
 function renderEventItem(event, index, events) {
-
   const config = EVENT_TYPE_CONFIG[event.event_type] || { icon: "📌", color: "text-slate-400", bg: "bg-slate-400/10", label: event.event_type };
   const link = getEventLink(event);
   const isLast = index === events.length - 1;
@@ -117,6 +116,91 @@ function renderEventItem(event, index, events) {
   );
 };
 
+
+
+export default function StrategyLineage({ strategyId, conversationId, entityType, entityId, className = "" }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        setLoading(true);
+        let url = "/api/lineage";
+        const params = new URLSearchParams();
+
+        if (entityType && entityId) {
+          url = `/api/lineage/entity/${entityType}/${entityId}`;
+        } else {
+          if (strategyId) params.set("strategy_id", strategyId);
+          if (conversationId) params.set("conversation_id", conversationId);
+        }
+
+        if (params.toString()) url += `?${params.toString()}`;
+
+        const data = await api(url);
+        if (mounted) {
+          setEvents(data.events || []);
+        }
+      } catch (e) {
+        if (mounted) setError(e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    load();
+    return () => { mounted = false; };
+  }, [strategyId, conversationId, entityType, entityId]);
+
+  if (loading) {
+    return (
+      <div className={`card p-6 ${className}`}>
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ai"></div>
+          <span className="ml-3 text-slate-400">Loading lineage...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={`card p-6 ${className}`}>
+        <div className="text-center py-8 text-down">
+          <p className="mb-2">Failed to load lineage</p>
+          <p className="text-sm text-slate-500">{error.detail?.message || error.message || "Unknown error"}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <div className={`card p-8 ${className}`}>
+        <div className="text-center py-8 text-slate-500">
+          <p className="mb-2">No lineage events found</p>
+          <p className="text-sm">Create a strategy, run a backtest, or start a conversation to build lineage</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`card ${className}`}>
+      <div className="p-3 border-b border-line flex items-center justify-between">
+        <h3 className="font-medium">Strategy Lineage</h3>
+        <span className="text-xs text-slate-400">{events.length} event{events.length !== 1 ? "s" : ""}</span>
+      </div>
+      <div className="p-3">
+        <div className="relative">
+          {/* Timeline line */}
+          <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-line" />
+
+          <div className="space-y-4 ml-10">
+            {events.map((event, index) => renderEventItem(event, index, events))}
           </div>
         </div>
       </div>
