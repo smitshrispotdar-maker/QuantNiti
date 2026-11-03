@@ -353,6 +353,7 @@ def compare_research(body: ResearchComparisonRequest, db: Session = Depends(get_
     
     # Store comparison result
     comparison_run = ResearchRun(
+        user_id=1,  # TODO: replace with actual auth
         strategy_id=runs[0].strategy_id if runs[0].strategy_id else None,
         conversation_id=None,
         backtest_run_id=None,

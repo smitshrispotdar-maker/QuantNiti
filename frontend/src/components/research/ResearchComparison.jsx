@@ -186,10 +186,7 @@ export default function ResearchComparison() {
               <div key={id} className="border border-line rounded p-3">
                 <h4 className="font-medium text-sm mb-2">Run #{id} {run?.label && `(${run.label})`}</h4>
                 <div className="space-y-1 text-xs">
-                  <p><span className="text-slate-400">Level: </span><span className="font-medium">{runRisk.level}</span></p>
-                  <p><span className="text-slate-400">Volatility: </span>{runRisk.ann_vol_pct}%</p>
-                  <p><span className="text-slate-400">Drawdown: </span>{runRisk.drawdown_pct}%</p>
-                  <p><span className="text-slate-400">Suggested Stop: </span>{runRisk.suggested_stop_pct}%</p>
+                  <p><span className="text-slate-400">Risk Assessment: </span><span className="font-medium">{runRisk}</span></p>
                 </div>
               </div>
             );
@@ -219,9 +216,9 @@ export default function ResearchComparison() {
                 <div className="space-y-1 text-xs">
                   <p><span className="text-slate-400">Data Source: </span>{prov.data_source}</p>
                   <p><span className="text-slate-400">Simulated: </span>{prov.is_simulated ? "Yes" : "No"}</p>
-                  <p><span className="text-slate-400">Bars: </span>{prov.bars_used}</p>
-                  <p><span className="text-slate-400">Timeframe: </span>{prov.timeframe}</p>
-                  <p><span className="text-slate-400">Symbol: </span>{prov.symbol}</p>
+                  <p><span className="text-slate-400">Created: </span>{prov.created_at ? new Date(prov.created_at).toLocaleString() : "N/A"}</p>
+                  <p><span className="text-slate-400">Strategy ID: </span>{prov.strategy_id || "N/A"}</p>
+                  <p><span className="text-slate-400">Backtest ID: </span>{prov.backtest_run_id || "N/A"}</p>
                 </div>
               </div>
             );
