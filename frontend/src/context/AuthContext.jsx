@@ -101,9 +101,10 @@ export function AuthProvider({ children }) {
       setUser(userResponse);
       localStorage.setItem(USER_KEY, JSON.stringify(userResponse));
     } catch (err) {
-      // Token likely expired or invalid
-      if (err.message?.includes("401") || err.detail?.includes("401") || err.message?.includes("Unauthorized")) {
-        logout();
+      // Token likely expired or invalid - check for 401 status or auth error messages
+      const detail = err.detail || err.message || "";
+      if (detail.includes("401") || detail.includes("Unauthorized") || detail.includes("Invalid or expired token") || detail.includes("Invalid credentials") || detail.includes("User not found") || detail.includes("Account is disabled")) {
+        await logout();
       }
     }
   }, [token, logout]);

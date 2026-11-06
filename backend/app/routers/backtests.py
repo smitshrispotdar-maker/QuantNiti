@@ -1,14 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import Strategy, BacktestRun
+from ..models import Strategy, BacktestRun, User
 from ..schemas import BacktestIn, StrategySpec
 from ..services import market, backtest, validation
+from ..services.auth import get_current_user_dep
+
 router = APIRouter(prefix="/api/backtests", tags=["backtests"])
+
 @router.post("")
-def run(body: BacktestIn, db: Session = Depends(get_db)):
+def run(body: BacktestIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     s = db.get(Strategy, body.strategy_id)
     if not s: raise HTTPException(404, "Strategy not found")
+    if s.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     spec = StrategySpec(**s.spec)
     # Structural validation first (with enhanced checks)
     pre = validation.validate(
@@ -46,8 +51,13 @@ def run(body: BacktestIn, db: Session = Depends(get_db)):
     )
     db.add(r); db.commit(); db.refresh(r)
     return {"id": r.id, "metrics": metrics, "equity_curve": curve, "trades": trades, "validation": gate, "meta": meta}
+
 @router.get("/{rid}")
-def get(rid: int, db: Session = Depends(get_db)):
+def get(rid: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
     r = db.get(BacktestRun, rid)
     if not r: raise HTTPException(404, "Run not found")
+    # Verify the user owns the strategy this backtest belongs to
+    s = db.get(Strategy, r.strategy_id)
+    if not s or s.user_id != current_user.id:
+        raise HTTPException(403, "Not authorized")
     return {"id": r.id, "metrics": r.metrics, "equity_curve": r.equity_curve, "trades": r.trades, "validation": r.validation}
