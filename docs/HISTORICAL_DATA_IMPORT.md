@@ -112,7 +112,7 @@ python -m app.cli.import_market_data \
 | Option | Required | Description |
 |--------|----------|-------------|
 | `--file` | Yes | Path to CSV file |
-| `--symbol` | Yes | Trading symbol (e.g., `^NSEI`, `BTC-USD`) |
+| `--symbol` | Yes | Trading symbol (e.g., `^NSEI`, `RELIANCE.NS`) |
 | `--timeframe` | Yes | One of: `1m`, `5m`, `15m`, `1h`, `1d` |
 | `--dry-run` | No | Validate only, no database writes |
 | `--on-conflict` | No | `skip` (default) or `update` for existing records |

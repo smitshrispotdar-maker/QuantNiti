@@ -115,6 +115,8 @@ class OrderIn(BaseModel):
     symbol: str
     side: Literal["BUY", "SELL"]
     qty: float = Field(gt=0)
+    stop_loss_price: Optional[float] = Field(default=None, gt=0)
+    take_profit_price: Optional[float] = Field(default=None, gt=0)
 
 class AccountIn(BaseModel):
     name: str = "Paper account"
@@ -285,6 +287,7 @@ class ResearchRunListResponse(BaseModel):
 class MarketMeta(BaseModel):
     symbol: str
     name: str
+    exchange: Optional[str] = None
     timeframe: str
     source: str
     status: str
@@ -303,13 +306,17 @@ class MarketBarRow(BaseModel):
     close: Optional[float] = None
     volume: Optional[float] = None
     sma20: Optional[float] = None
+    ema9: Optional[float] = None
     ema20: Optional[float] = None
+    ema21: Optional[float] = None
     ema50: Optional[float] = None
+    ema200: Optional[float] = None
     rsi: Optional[float] = None
     macd: Optional[float] = None
     macd_signal: Optional[float] = None
     macd_hist: Optional[float] = None
     bb_upper: Optional[float] = None
+    bb_middle: Optional[float] = None
     bb_lower: Optional[float] = None
     range: Optional[List[float]] = None
 
@@ -339,6 +346,10 @@ class SymbolInfo(BaseModel):
     symbol: str
     name: str
     timezone: str
+    exchange: Optional[str] = None
+    kind: Optional[str] = None
+    available: Optional[bool] = None
+    reason: Optional[str] = None
 
 
 # Personal Watchlist Schemas
@@ -351,7 +362,13 @@ class WatchlistItemResponse(BaseModel):
     symbol: str
     name: str
     price: Optional[float] = None
+    change: Optional[float] = None
     change_pct: Optional[float] = None
+    status: Optional[str] = None
+    provider: Optional[str] = None
+    exchange: Optional[str] = None
+    last_bar: Optional[str] = None
+    reason: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -360,3 +377,4 @@ class WatchlistItemResponse(BaseModel):
 
 class WatchlistResponse(BaseModel):
     items: List[WatchlistItemResponse]
+    hidden_legacy_symbols: List[str] = []

@@ -69,7 +69,7 @@ class CSVImporter:
         Initialize the importer.
         
         Args:
-            symbol: Trading symbol (e.g., ^NSEI, BTC-USD)
+            symbol: Trading symbol (e.g., ^NSEI, RELIANCE.NS)
             timeframe: Timeframe (1m, 5m, 15m, 1h, 1d)
             dry_run: If True, validate only without writing to DB
             on_conflict: How to handle existing records - "skip" or "update"
@@ -462,7 +462,7 @@ Supported timeframes: 1m, 5m, 15m, 1h, 1d
     )
     
     parser.add_argument("--file", required=True, help="Path to CSV file")
-    parser.add_argument("--symbol", required=True, help="Trading symbol (e.g., ^NSEI, BTC-USD)")
+    parser.add_argument("--symbol", required=True, help="Trading symbol (e.g., ^NSEI, RELIANCE.NS)")
     parser.add_argument("--timeframe", required=True, choices=VALID_TIMEFRAMES, help="Timeframe")
     parser.add_argument("--dry-run", action="store_true", help="Validate only, no database writes")
     parser.add_argument("--on-conflict", choices=["skip", "update"], default="skip", 

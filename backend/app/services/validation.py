@@ -3,10 +3,9 @@ from ..schemas import StrategySpec, IndicatorSpec, INDICATOR_TYPES
 from typing import Optional
 from datetime import datetime
 
-# Supported instruments (from market data availability)
-SUPPORTED_INSTRUMENTS = {
-    "BTC-USD", "ETH-USD", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "SPY", "QQQ", "^GSPC", "^NSEI"
-}
+# Supported instruments — India-only (NSE/BSE). Keep in sync with
+# services.instruments.INSTRUMENTS.
+from .instruments import SUPPORTED_INSTRUMENTS, provider_symbol
 
 # Supported timeframes
 SUPPORTED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "1d"}
@@ -114,6 +113,8 @@ def validate(spec: StrategySpec, metrics: dict | None = None, bars_count: int | 
     for inst in spec.instruments:
         if inst not in SUPPORTED_INSTRUMENTS:
             errors.append(f"Unsupported instrument: {inst}. Supported: {', '.join(sorted(SUPPORTED_INSTRUMENTS))}")
+        elif provider_symbol(inst) is None:
+            errors.append(f"Market data unavailable for {inst} from the configured provider. Choose a supported NSE/BSE instrument with provider coverage.")
     
     # Validate timeframe
     if spec.timeframe not in SUPPORTED_TIMEFRAMES:

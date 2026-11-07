@@ -322,9 +322,17 @@ def place_manual_order(
     symbol: str,
     side: str,
     qty: float,
-    reason: str = "manual"
+    reason: str = "manual",
+    stop_loss_price: Optional[float] = None,
+    take_profit_price: Optional[float] = None,
 ) -> PaperOrder:
-    """Place a manual order for a deployment."""
+    """Place a manual order for a deployment.
+
+    Optional stop-loss / take-profit levels are attached to the resulting
+    order and to the open position so the paper terminal can display them.
+    They are risk annotations for the simulated position; they are not sent to
+    any exchange.
+    """
     deployment = db.get(PaperDeployment, deployment_id)
     if not deployment:
         raise PaperExecutionError("Deployment not found", "DEPLOYMENT_NOT_FOUND")
@@ -363,6 +371,8 @@ def place_manual_order(
             reason=reason,
             transaction_cost_bps=deployment.transaction_cost_bps,
             slippage_bps=deployment.slippage_bps,
+            stop_price=stop_loss_price,
+            take_profit_price=take_profit_price,
         )
         
         # Update position
@@ -372,12 +382,18 @@ def place_manual_order(
             total_qty = position.qty + qty
             position.avg_entry_price = (position.avg_entry_price * position.qty + buy_price_net * qty) / total_qty
             position.qty = total_qty
+            if stop_loss_price is not None:
+                position.stop_loss_price = stop_loss_price
+            if take_profit_price is not None:
+                position.take_profit_price = take_profit_price
         else:
             position = PaperPosition(
                 deployment_id=deployment.id,
                 symbol=symbol,
                 qty=qty,
                 avg_entry_price=buy_price_net,
+                stop_loss_price=stop_loss_price,
+                take_profit_price=take_profit_price,
             )
             db.add(position)
     
@@ -406,6 +422,8 @@ def place_manual_order(
             reason=reason,
             transaction_cost_bps=deployment.transaction_cost_bps,
             slippage_bps=deployment.slippage_bps,
+            stop_price=stop_loss_price,
+            take_profit_price=take_profit_price,
         )
         
         if position:
@@ -491,6 +509,8 @@ def get_deployment_state(db: Session, deployment: PaperDeployment) -> Dict[str, 
         "label": o.label,
         "transaction_cost_bps": o.transaction_cost_bps,
         "slippage_bps": o.slippage_bps,
+        "stop_loss_price": getattr(o, "stop_price", None),
+        "take_profit_price": getattr(o, "take_profit_price", None),
     } for o in orders]
     
     # Get trades for metrics

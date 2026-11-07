@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import ResearchRun, Strategy, Conversation, BacktestRun, PaperDeployment, User
-from ..schemas import ResearchRunCreate, ResearchRunResponse, ResearchRunListResponse
+from ..schemas import ResearchRunCreate, ResearchRunResponse, ResearchRunListResponse, StrategySpec
 from ..services import research, market, backtest
 from typing import Optional
 from datetime import datetime
@@ -110,7 +110,7 @@ def create_run(body: ResearchRunCreate, db: Session = Depends(get_db), current_u
     # Get market data for research
     if body.strategy_id:
         strategy = db.get(Strategy, body.strategy_id)
-        symbol = strategy.spec.get("instruments", ["BTC-USD"])[0]
+        symbol = strategy.spec.get("instruments", ["^NSEI"])[0]
         timeframe = strategy.spec.get("timeframe", "1d")
     elif body.deployment_id:
         dep = db.get(PaperDeployment, body.deployment_id)
@@ -119,18 +119,25 @@ def create_run(body: ResearchRunCreate, db: Session = Depends(get_db), current_u
         timeframe = spec.timeframe
     elif body.backtest_run_id:
         run = db.get(BacktestRun, body.backtest_run_id)
-        symbol = run.strategy_spec.get("instruments", ["BTC-USD"])[0]
+        symbol = run.strategy_spec.get("instruments", ["^NSEI"])[0]
         timeframe = run.strategy_spec.get("timeframe", "1d")
     else:
-        # Default to BTC-USD daily
-        symbol = "BTC-USD"
+        # Default to NIFTY 50 daily
+        symbol = "^NSEI"
         timeframe = "1d"
     
     # Fetch market data
     df, meta = market.get_bars(symbol, timeframe, 500)
     
-    # Run research analysis
-    research_result = research.run(df)
+    # Run research analysis. No/insufficient data means no analysis — never fabricate it.
+    if len(df) < 31:
+        research_result = {
+            "facts": None,
+            "interpretations": None,
+            "label": "AI ANALYSIS UNAVAILABLE — INSUFFICIENT MARKET DATA",
+        }
+    else:
+        research_result = research.run(df)
     
     # Determine data source and quality
     is_simulated = meta.get("status") == "SIMULATED"
@@ -200,7 +207,7 @@ def create_from_chat(
         raise HTTPException(400, "No draft strategy in conversation")
     
     spec = conv.draft_spec
-    symbol = spec.get("instruments", ["BTC-USD"])[0]
+    symbol = spec.get("instruments", ["^NSEI"])[0]
     timeframe = spec.get("timeframe", "1d")
     
     # Fetch market data

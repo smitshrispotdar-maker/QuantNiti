@@ -66,7 +66,7 @@ export default function Paper() {
   const P = (p, b) => api(p, { method: "POST", body: b });
 
   const createAccount = async () => {
-    const n = await P("/api/paper/accounts", { name: "Paper account", starting_cash: 100000 });
+    const n = await P("/api/paper/accounts", { name: "Paper account", starting_cash: 500000 });
     await loadAccount(n.id);
   };
 
@@ -95,7 +95,7 @@ export default function Paper() {
   };
 
   const placeOrder = () => act(() => P(`/api/paper/deployments/${deployment.id}/orders`, {
-    symbol: newDep.symbol || "BTC-USD",
+    symbol: newDep.symbol || "RELIANCE.NS",
     side: newDep.side || "BUY",
     qty: newDep.qty || 0.1,
   }));
@@ -105,7 +105,7 @@ export default function Paper() {
       {/* Sidebar - Accounts & Deployments */}
       <div className="card col-span-3 p-2">
         <button className="btn btn-ai w-full mb-2" onClick={createAccount}>
-          New paper account ($100k simulated)
+          New paper account (₹5,00,000 simulated)
         </button>
         {accts.map((x) => (
           <button
@@ -438,7 +438,7 @@ export default function Paper() {
                     <div className="flex gap-2 mb-3 flex-wrap">
                       <input
                         className="bg-panel border border-line rounded px-2 w-28 text-sm"
-                        value={newDep.symbol || "BTC-USD"}
+                        value={newDep.symbol || "RELIANCE.NS"}
                         onChange={(e) => setNewDep({ ...newDep, symbol: e.target.value })}
                         placeholder="Symbol"
                       />
@@ -489,7 +489,7 @@ export default function Paper() {
                 {note && <div className="text-sm text-ai mb-2">{note}</div>}
 
                 <div className="flex gap-2 mb-3 text-sm">
-                  <input className="bg-panel border border-line rounded px-2 w-28" value={newDep.symbol || "BTC-USD"} onChange={(e) => setNewDep({ ...newDep, symbol: e.target.value })} placeholder="Symbol" />
+                  <input className="bg-panel border border-line rounded px-2 w-28" value={newDep.symbol || "RELIANCE.NS"} onChange={(e) => setNewDep({ ...newDep, symbol: e.target.value })} placeholder="Symbol" />
                   <select className="bg-panel border border-line rounded" value={newDep.side || "BUY"} onChange={(e) => setNewDep({ ...newDep, side: e.target.value })}><option>BUY</option><option>SELL</option></select>
                   <input type="number" step="0.000001" className="bg-panel border border-line rounded px-2 w-24 num" value={newDep.qty || 0.1} onChange={(e) => setNewDep({ ...newDep, qty: Number(e.target.value) })} placeholder="Qty" />
                   <button className="btn" onClick={act(() => P(`/api/paper/accounts/${aid}/orders`, { symbol: newDep.symbol, side: newDep.side, qty: newDep.qty }))}>Place Simulated Order</button>

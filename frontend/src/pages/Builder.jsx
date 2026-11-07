@@ -20,7 +20,7 @@ const mk = (kind, n) => ({
     kind,
     label: `${KINDS[kind]}`,
     p: kind === "data"
-      ? { symbol: "BTC-USD", timeframe: "1d" }
+      ? { symbol: "^NSEI", timeframe: "1d" }
       : kind === "indicator"
       ? { type: "EMA", period: 20 }
       : kind === "condition"
@@ -91,7 +91,7 @@ export function fromSpec(spec) {
     nodes.push(nd);
     return nd.id;
   };
-  add("data", { symbol: spec.instruments[0] || "BTC-USD", timeframe: spec.timeframe });
+  add("data", { symbol: spec.instruments[0] || "^NSEI", timeframe: spec.timeframe });
   spec.indicators.forEach((i) => add("indicator", { type: i.type, period: i.params.period ?? 14 }));
   add("risk", { stop_loss_pct: spec.risk.stop_loss_pct ?? 5, max_position_pct: spec.risk.max_position_pct });
   [["entry", spec.entry_rules], ["exit", spec.exit_rules]].forEach(([k, rs]) => {

@@ -8,26 +8,58 @@ import Paper from '../pages/Paper.jsx'
 import Journal from '../pages/Journal.jsx'
 
 // Mock the API module
-vi.mock('../api.jsx', () => ({
-  api: vi.fn(() => Promise.resolve({})),
-  fmt: (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })),
-  pnlColor: (n) => (n >= 0 ? 'text-up' : 'text-down'),
-  Badge: ({ status }) => <span data-testid="badge">{status}</span>,
-  ErrorBox: ({ err }) => err ? <div data-testid="error">{err.message}</div> : null,
-  watchlistApi: {
-    get: vi.fn(() => Promise.resolve([])),
-    add: vi.fn(() => Promise.resolve({})),
-    remove: vi.fn(() => Promise.resolve({})),
-    symbols: vi.fn(() => Promise.resolve([])),
-  },
-}))
+vi.mock('../api.jsx', () => {
+  const pass = () => Promise.resolve({})
+  const empty = () => Promise.resolve([])
+  return {
+    api: vi.fn(() => Promise.resolve({})),
+    fmt: (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })),
+    fmtCompact: (n) => (n == null ? '—' : String(n)),
+    fmtDateTime: () => '—',
+    fmtTime: () => '—',
+    signed: (n) => (n == null ? '—' : String(n)),
+    signedPct: (n) => (n == null ? '—' : `${n}%`),
+    pnlColor: (n) => (n >= 0 ? 'text-up' : 'text-down'),
+    Badge: ({ status }) => <span data-testid="badge">{status}</span>,
+    ErrorBox: ({ err }) => err ? <div data-testid="error">{err.message}</div> : null,
+    EmptyState: ({ title }) => <div>{title}</div>,
+    wsUrl: (path) => `ws://test${path}`,
+    watchlistApi: {
+      get: vi.fn(() => Promise.resolve([])),
+      add: vi.fn(() => Promise.resolve({})),
+      remove: vi.fn(() => Promise.resolve({})),
+      reorder: vi.fn(() => Promise.resolve({})),
+      symbols: vi.fn(() => Promise.resolve([])),
+    },
+    marketApi: {
+      overview: vi.fn(pass),
+      bars: vi.fn(() => Promise.resolve({ meta: null, bars: [] })),
+      research: vi.fn(pass),
+      indices: vi.fn(pass),
+      movers: vi.fn(pass),
+      tape: vi.fn(pass),
+      capabilities: vi.fn(pass),
+      status: vi.fn(pass),
+      search: vi.fn(empty),
+      symbols: vi.fn(empty),
+    },
+    paperApi: {
+      accounts: vi.fn(empty),
+      account: vi.fn(pass),
+      create: vi.fn(pass),
+      order: vi.fn(pass),
+      deploymentOrder: vi.fn(pass),
+      control: vi.fn(pass),
+    },
+  }
+})
 
 import { fmt, pnlColor } from '../api.jsx'
 
 const mockDraft = {
   schema_version: '1.0',
   name: 'Test Strategy',
-  instruments: ['BTC-USD'],
+  instruments: ['^NSEI'],
   timeframe: '1d',
   indicators: [],
   entry_rules: [],

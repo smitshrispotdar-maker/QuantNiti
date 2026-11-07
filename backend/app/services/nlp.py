@@ -3,7 +3,18 @@ Returns (spec, clarifications). Swap in any LLM by making it emit StrategySpec J
 Also detects special actions: backtest, deploy, explain."""
 import re
 from ..schemas import StrategySpec, IndicatorSpec, Rule, RiskLimits
-TICKERS = {"BTC": "BTC-USD", "BITCOIN": "BTC-USD", "ETH": "ETH-USD", "ETHEREUM": "ETH-USD", "AAPL": "AAPL", "APPLE": "AAPL", "SPY": "SPY"}
+# India-only aliases. Canonical symbols match services.instruments.
+TICKERS = {
+    "nifty 50": "^NSEI", "nifty50": "^NSEI", "nifty": "^NSEI",
+    "bank nifty": "^NSEBANK", "banknifty": "^NSEBANK", "^NSEBANK": "^NSEBANK",
+    "finnifty": "NIFTY_FIN_SERVICE.NS", "financial services": "NIFTY_FIN_SERVICE.NS",
+    "india vix": "^INDIAVIX", "indiavix": "^INDIAVIX", "vix": "^INDIAVIX",
+    "reliance": "RELIANCE.NS", "ril": "RELIANCE.NS",
+    "tcs": "TCS.NS", "infosys": "INFY.NS", "infy": "INFY.NS",
+    "hdfc bank": "HDFCBANK.NS", "hdfcbank": "HDFCBANK.NS",
+    "icici bank": "ICICIBANK.NS", "icicibank": "ICICIBANK.NS",
+    "sbi": "SBIN.NS", "state bank": "SBIN.NS", "sbin": "SBIN.NS",
+}
 TF = {"daily": "1d", "day": "1d", "1d": "1d", "hourly": "1h", "1h": "1h", "15m": "15m", "5m": "5m", "1m": "1m"}
 ACTION_KEYWORDS = {
     "backtest": ["backtest", "run backtest", "test strategy", "simulate", "back test"],
@@ -20,8 +31,15 @@ def _detect_action(text: str) -> tuple[str | None, dict]:
     return None, {}
 def parse(text: str, base: StrategySpec | None = None):
     t = text.lower(); spec = base.model_copy(deep=True) if base else StrategySpec(); ask = []
-    for w, sym in TICKERS.items():
-        if re.search(rf"\b{w.lower()}\b", t) and sym not in spec.instruments: spec.instruments.append(sym)
+    # Match longer aliases first and mask matched spans so "bank nifty" does not
+    # also match the shorter "nifty" alias.
+    for w in sorted((k for k in TICKERS if not k.startswith("^")), key=len, reverse=True):
+        pattern = rf"\b{re.escape(w.lower())}\b"
+        if re.search(pattern, t):
+            sym = TICKERS[w]
+            if sym not in spec.instruments:
+                spec.instruments.append(sym)
+            t = re.sub(pattern, lambda m: " " * len(m.group(0)), t)
     for w, tf in TF.items():
         if re.search(rf"\b{w}\b", t): spec.timeframe = tf
     ind = {i.id: i for i in spec.indicators}
@@ -48,7 +66,7 @@ def parse(text: str, base: StrategySpec | None = None):
     spec.indicators = list(ind.values()); spec.entry_rules += entry; spec.exit_rules += exit_
     if re.search(r"\b(buy|long)\b", t) and re.search(r"\b(short|sell short)\b", t): ask.append("You mention both long and short. This MVP supports long-only — should I keep long only?")
     if "rsi" in t and re.search(r"rsi[^.]*(below|under)[^.]*(sell|exit)", t): ask.append("Selling when RSI is low contradicts typical mean-reversion. Did you mean above?")
-    if not spec.instruments: ask.append("Which instrument? (BTC, ETH, AAPL or SPY)")
+    if not spec.instruments: ask.append("Which Indian instrument? (e.g. NIFTY 50, BANK NIFTY, RELIANCE, TCS, INFY)")
     if not spec.entry_rules: ask.append("What should trigger an entry? e.g. 'buy when RSI is below 30' or 'EMA 20 crosses above EMA 50'.")
     if not spec.exit_rules and not spec.risk.stop_loss_pct: ask.append("What should trigger an exit? A stop-loss is set at " + f"{spec.risk.stop_loss_pct}% by default.")
     return spec, ask

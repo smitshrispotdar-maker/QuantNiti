@@ -370,7 +370,7 @@ export default function Studio({ setDraft, draft, setSaved, saved }) {
               {!msgs.length && !cid && (
                 <p className="text-sm text-slate-500 text-center py-8">
                   Start a conversation or select one from the sidebar.<br />
-                  <span className="text-xs">Try: "Buy BTC when EMA 20 crosses above EMA 50, exit on cross below, stop loss 5%, position size 30%"</span>
+                  <span className="text-xs">Try: "Buy NIFTY 50 when EMA 20 crosses above EMA 50, exit on cross below, stop loss 5%, position size 30%"</span>
                 </p>
               )}
               {msgs.map((m, i) => (

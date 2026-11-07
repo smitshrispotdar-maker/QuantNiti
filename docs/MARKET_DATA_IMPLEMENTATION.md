@@ -19,8 +19,13 @@
 ### 1.2 Supported Symbols
 
 ```python
-WATCHLIST = ["BTC-USD", "ETH-USD", "AAPL", "SPY", "^NSEI", "^NSEBANK"]
-# Search adds: MSFT, TSLA, QQQ, SOL-USD
+# India-only catalogue (services/instruments.py)
+DEFAULT_WATCHLIST = [
+    "^NSEI", "^NSEBANK", "NIFTY_FIN_SERVICE.NS", "RELIANCE.NS",
+    "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "^INDIAVIX",
+]
+# Search covers Indian indices plus NSE/BSE-listed stocks only.
+# NIFTY NEXT 50 is searchable but marked UNAVAILABLE (no provider coverage).
 ```
 
 ### 1.3 Supported Timeframes
@@ -47,7 +52,7 @@ market.get_bars(symbol, tf, n, db=session)
     ├── USE_LIVE_DATA=true → yfinance.download()
     │       │
     │       ├── Success (len > 30) → validate OHLC → detect gaps/duplicates → cache write → return (df, meta: YAHOO FINANCE, DELAYED)
-    │       └── Failure/short data → fallback to mock
+    │       └── Failure/short data for an Indian instrument → return empty bars + UNAVAILABLE (never fabricated)
     │
     └── USE_LIVE_DATA=false → _mock() → validate OHLC → detect gaps/duplicates → cache write → return (df, meta: MOCK GENERATOR, SIMULATED)
 ```
@@ -57,15 +62,15 @@ market.get_bars(symbol, tf, n, db=session)
 ```json
 {
   "meta": {
-    "symbol": "BTC-USD",
-    "name": "Bitcoin",
+    "symbol": "^NSEI",
+    "name": "NIFTY 50",
     "timeframe": "1d",
     "source": "YAHOO FINANCE" | "MOCK GENERATOR" | "CACHED",
     "status": "DELAYED" | "SIMULATED" | "CACHED",
     "last_bar": "2026-11-02T00:00:00",
     "fetched_at": "2026-11-02T12:34:56.789",
-    "label": "PAPER/SIMULATED",
-    "exchange_timezone": "UTC",
+    "label": "MARKET DATA",
+    "exchange_timezone": "Asia/Kolkata",
     "data_quality": {
       "issues": [],           // OHLC validation issues fixed
       "gaps": [],             // Missing timestamp gaps detected
@@ -76,7 +81,7 @@ market.get_bars(symbol, tf, n, db=session)
     }
   },
   "bars": [
-    {"ts": "2026-10-01T00:00:00", "open": 65000, "high": 66000, "low": 64500, "close": 65500, "volume": 100000, "sma20": ..., "ema20": ..., ...}
+    {"ts": "2026-10-01 00:00:00", "open": 24800, "high": 25100, "low": 24750, "close": 25030, "volume": 0, "sma20": ..., "ema20": ..., ...}
   ]
 }
 ```

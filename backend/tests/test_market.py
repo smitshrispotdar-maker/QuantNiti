@@ -137,13 +137,16 @@ class TestWatchlist:
     """Tests for the watchlist constant."""
     
     def test_watchlist_contains_expected_symbols(self):
-        assert "BTC-USD" in WATCHLIST
-        assert "ETH-USD" in WATCHLIST
-        assert "AAPL" in WATCHLIST
-        assert "SPY" in WATCHLIST
-        assert "^NSEI" in WATCHLIST
-        assert "^NSEBANK" in WATCHLIST
-        assert len(WATCHLIST) == 6
+        # India-only default watchlist.
+        for symbol in ["^NSEI", "^NSEBANK", "NIFTY_FIN_SERVICE.NS", "^INDIAVIX",
+                       "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS",
+                       "ICICIBANK.NS", "SBIN.NS"]:
+            assert symbol in WATCHLIST
+        assert "BTC-USD" not in WATCHLIST
+        assert "ETH-USD" not in WATCHLIST
+        assert "AAPL" not in WATCHLIST
+        assert "SPY" not in WATCHLIST
+        assert len(WATCHLIST) == 10
     
     def test_yf_interval_mapping(self):
         assert YF_INTERVAL["1m"] == "1m"
@@ -205,18 +208,21 @@ class TestLiveDataFallback:
         assert meta["source"] == "MOCK GENERATOR"
         assert meta["status"] == "SIMULATED"
     
-    def test_live_data_true_tries_yfinance(self, monkeypatch):
-        """When USE_LIVE_DATA=true, should try yfinance first."""
+    def test_live_data_true_unavailable_is_explicit(self, monkeypatch):
+        """Supported Indian symbols must not fabricate data when the provider fails."""
         monkeypatch.setenv("USE_LIVE_DATA", "true")
-        
-        # We can't easily test yfinance without network, but we can verify
-        # the function doesn't crash and returns something
-        df, meta = get_bars("BTC-USD", "1d", 30)
-        
-        # Should return either YAHOO or MOCK (fallback)
-        assert meta["source"] in ["YAHOO FINANCE", "MOCK GENERATOR"]
-        assert meta["status"] in ["DELAYED", "SIMULATED"]
-        assert meta["label"] == "PAPER/SIMULATED"
+
+        import yfinance as yf
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("provider offline")
+
+        monkeypatch.setattr(yf, "download", fail)
+        df, meta = get_bars("^NSEI", "1d", 30)
+
+        assert df.empty
+        assert meta["source"] == "PROVIDER UNAVAILABLE"
+        assert meta["status"] == "UNAVAILABLE"
 
 
 class TestDataQuality:
@@ -372,7 +378,7 @@ class TestNiftySymbols:
         assert "^NSEI" in WATCHLIST
         assert "^NSEBANK" in WATCHLIST
         assert SYMBOL_NAMES["^NSEI"] == "NIFTY 50"
-        assert SYMBOL_NAMES["^NSEBANK"] == "NIFTY Bank"
+        assert SYMBOL_NAMES["^NSEBANK"] == "BANK NIFTY"
         assert EXCHANGE_TIMEZONES["^NSEI"] == "Asia/Kolkata"
         assert EXCHANGE_TIMEZONES["^NSEBANK"] == "Asia/Kolkata"
     
@@ -388,5 +394,5 @@ class TestNiftySymbols:
             assert meta["symbol"] == symbol
             assert meta["source"] == "MOCK GENERATOR"
             assert meta["status"] == "SIMULATED"
-            assert meta["name"] in ["NIFTY 50", "NIFTY Bank"]
+            assert meta["name"] in ["NIFTY 50", "BANK NIFTY"]
             assert meta["exchange_timezone"] == "Asia/Kolkata"

@@ -1,9 +1,129 @@
-@tailwind base; @tailwind components; @tailwind utilities;
-body { @apply bg-ink text-slate-200 font-sans; }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --ink: #080b11;
+  --panel: #0f141d;
+  --surface: #141b26;
+  --line: #212b3a;
+  --up: #16c784;
+  --down: #ea3943;
+  --ai: #38bdf8;
+  --amber: #f0b90b;
+  --muted: #7c8aa0;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  @apply bg-ink text-text font-sans antialiased;
+  font-feature-settings: "tnum" 1, "cv02" 1, "cv03" 1, "cv04" 1;
+  overflow: hidden;
+}
+
+::selection { background: rgba(56, 189, 248, 0.28); }
+
+/* Thin terminal scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #223047; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #2d3d57; }
+
 .num { @apply font-mono tabular-nums; }
-.card { @apply bg-panel border border-line rounded-md; }
-.btn { @apply px-3 py-1.5 rounded border border-line bg-line/40 hover:bg-line text-sm; }
-.btn-ai { @apply border-ai/50 text-ai hover:bg-ai/10; }
-.badge { @apply num text-[10px] px-1.5 py-0.5 rounded border; }
-.watermark::after { content: "PAPER / SIMULATED"; position: fixed; right: 12px; bottom: 8px; font: 600 11px 'JetBrains Mono'; color: #00E5FF55; pointer-events: none; z-index: 50; }
+
+.card {
+  @apply bg-panel border border-line rounded-lg shadow-panel;
+}
+
+.panel-head {
+  @apply flex items-center gap-2 px-3 h-9 border-b border-line text-[11px] font-semibold uppercase tracking-[0.08em] text-muted;
+}
+
+.panel-body { @apply p-3; }
+
+.btn {
+  @apply inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md border border-line bg-surface hover:bg-raised text-xs text-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed;
+}
+.btn-ai { @apply border-ai/40 text-ai hover:bg-ai/10; }
+.btn-up { @apply border-up/40 text-up hover:bg-up/10; }
+.btn-down { @apply border-down/40 text-down hover:bg-down/10; }
+.btn-ghost { @apply border-transparent bg-transparent text-muted hover:text-text hover:bg-surface; }
+.btn-xs { @apply px-1.5 py-0.5 text-2xs rounded; }
+
+.input {
+  @apply w-full bg-ink border border-line rounded-md px-2 py-1.5 text-xs text-text placeholder:text-muted-2 outline-none focus:border-ai/50 focus:ring-1 focus:ring-ai/20 transition;
+}
+.select { @apply input appearance-none pr-6; }
+
+.badge {
+  @apply num inline-flex items-center gap-1 text-[10px] leading-none px-1.5 py-1 rounded border border-line text-muted whitespace-nowrap;
+}
+.badge-up { @apply text-up border-up/40 bg-up/10; }
+.badge-down { @apply text-down border-down/40 bg-down/10; }
+.badge-ai { @apply text-ai border-ai/40 bg-ai/10; }
+.badge-amber { @apply text-amber border-amber/40 bg-amber/10; }
+
+.kbd {
+  @apply num text-[10px] px-1.5 py-0.5 rounded border border-line bg-ink text-muted;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.pulse-dot { position: relative; }
+.pulse-dot::after {
+  content: "";
+  position: absolute; inset: -3px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0.5;
+  animation: pulse-ring 2s ease-out infinite;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.7); opacity: 0.65; }
+  70% { transform: scale(1.8); opacity: 0; }
+  100% { opacity: 0; }
+}
+
+.skeleton {
+  @apply rounded bg-surface;
+  background-image: linear-gradient(90deg, #141b26 0%, #1b2433 50%, #141b26 100%);
+  background-size: 200% 100%;
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+@keyframes skeleton { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.watermark::after {
+  content: "PAPER / SIMULATED — NO REAL MONEY";
+  position: fixed; right: 10px; bottom: 6px;
+  font: 600 9px "JetBrains Mono", monospace;
+  letter-spacing: 0.08em;
+  color: #38bdf855;
+  pointer-events: none; z-index: 50;
+}
+
 .react-flow__attribution { display: none; }
+
+.chart-shell { position: relative; }
+.chart-shell .tv-lightweight-charts { border-radius: 6px; }
+
+/* Resizable dashboard columns */
+.resizer-x {
+  width: 5px; cursor: col-resize; flex: 0 0 5px;
+  background: transparent; transition: background 120ms;
+}
+.resizer-x:hover { background: #38bdf866; }
+
+/* Utility for truncating long instrument names */
+.truncate-1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.scroll-area { overflow-y: auto; overscroll-behavior: contain; }
+
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+.fade-in { animation: fade-in 180ms ease-out; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }

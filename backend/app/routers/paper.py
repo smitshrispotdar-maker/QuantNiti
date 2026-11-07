@@ -5,8 +5,15 @@ from ..db import get_db
 from ..models import PaperAccount, PaperOrder, PaperDeployment, PaperPosition, Strategy, BacktestRun, User
 from ..schemas import AccountIn, OrderIn, DeployIn, StrategySpec
 from ..services import market, backtest, validation, paper
+from ..services import instruments as inst
 from ..services.auth import get_current_user_dep
 router = APIRouter(prefix="/api/paper", tags=["paper"])
+
+def _resolve_symbol(symbol: str) -> str:
+    resolved = inst.resolve_symbol(symbol)
+    if not resolved:
+        raise HTTPException(400, f"Unsupported instrument: {symbol}. QuantNiti supports NSE/BSE instruments only.")
+    return resolved
 
 def _acct(db: Session, aid: int) -> PaperAccount:
     a = db.get(PaperAccount, aid)
@@ -22,8 +29,13 @@ def _legacy_state(db: Session, a: PaperAccount) -> dict:
     """Legacy state computation for backwards compatibility with manual accounts."""
     pos = {}
     for o in db.query(PaperOrder).filter_by(account_id=a.id).order_by(PaperOrder.id):
-        p = pos.setdefault(o.symbol, {"qty": 0.0, "cost": 0.0, "realized": 0.0}); sgn = 1 if o.side == "BUY" else -1
-        if sgn > 0: p["cost"] += o.qty * o.fill_price; p["qty"] += o.qty
+        p = pos.setdefault(o.symbol, {"qty": 0.0, "cost": 0.0, "realized": 0.0,
+                                      "stop_loss_price": None, "take_profit_price": None})
+        sgn = 1 if o.side == "BUY" else -1
+        if sgn > 0:
+            p["cost"] += o.qty * o.fill_price; p["qty"] += o.qty
+            p["stop_loss_price"] = getattr(o, "stop_price", None) or p["stop_loss_price"]
+            p["take_profit_price"] = getattr(o, "take_profit_price", None) or p["take_profit_price"]
         else:
             avg = p["cost"] / p["qty"] if p["qty"] else o.fill_price
             p["realized"] += o.qty * (o.fill_price - avg); p["cost"] -= avg * o.qty; p["qty"] -= o.qty
@@ -32,7 +44,12 @@ def _legacy_state(db: Session, a: PaperAccount) -> dict:
         if p["qty"] < 1e-9 and not p["realized"]: continue
         px = market.get_bars(sym, "1d", 60)[0].close.iloc[-1] if p["qty"] > 1e-9 else 0
         avg = p["cost"] / p["qty"] if p["qty"] > 1e-9 else 0; eq += p["qty"] * px
-        out.append({"symbol": sym, "qty": round(p["qty"], 6), "avg_price": round(avg, 2), "last": round(px, 2), "unrealized": round(p["qty"] * (px - avg), 2), "realized": round(p["realized"], 2)})
+        out.append({
+            "symbol": sym, "name": inst.name_for(sym), "qty": round(p["qty"], 6),
+            "avg_price": round(avg, 2), "last": round(px, 2),
+            "unrealized": round(p["qty"] * (px - avg), 2), "realized": round(p["realized"], 2),
+            "stop_loss_price": p["stop_loss_price"], "take_profit_price": p["take_profit_price"],
+        })
     return {"id": a.id, "name": a.name, "status": a.status, "cash": round(a.cash, 2), "equity": round(eq, 2), "starting_cash": a.starting_cash,
             "pnl": round(eq - a.starting_cash, 2), "positions": out, "strategy_id": a.strategy_id, "label": "PAPER/SIMULATED"}
 
@@ -84,7 +101,10 @@ def get(aid: int, db: Session = Depends(get_db), current_user: User = Depends(ge
         if deployment:
             return paper.get_deployment_state(db, deployment)
     s = _legacy_state(db, a)
-    s["orders"] = [{"id": o.id, "symbol": o.symbol, "side": o.side, "qty": o.qty, "fill_price": o.fill_price, "reason": o.reason, "ts": o.ts.isoformat(), "label": o.label}
+    s["orders"] = [{"id": o.id, "symbol": o.symbol, "side": o.side, "qty": o.qty, "fill_price": o.fill_price,
+                    "reason": o.reason, "ts": o.ts.isoformat(), "label": o.label,
+                    "stop_loss_price": getattr(o, "stop_price", None),
+                    "take_profit_price": getattr(o, "take_profit_price", None)}
                    for o in db.query(PaperOrder).filter_by(account_id=aid).order_by(PaperOrder.id.desc()).limit(50)]
     return s
 
@@ -95,14 +115,22 @@ def order(aid: int, body: OrderIn, db: Session = Depends(get_db), current_user: 
     if a.user_id != current_user.id:
         raise HTTPException(403, "Not authorized")
     if a.status != "RUNNING": raise HTTPException(409, f"Account is {a.status}; orders blocked.")
-    px = float(market.get_bars(body.symbol.upper(), "1d", 60)[0].close.iloc[-1]); cost = body.qty * px
+    symbol = _resolve_symbol(body.symbol)
+    if body.stop_loss_price and body.take_profit_price and body.stop_loss_price >= body.take_profit_price:
+        raise HTTPException(422, "Stop-loss must be below take-profit.")
+    df, _ = market.get_bars(symbol, "1d", 60)
+    if df.empty:
+        raise HTTPException(503, "Market data unavailable; cannot fill a simulated order right now.")
+    px = float(df.close.iloc[-1]); cost = body.qty * px
     if body.side == "BUY" and cost > a.cash: raise HTTPException(422, "Insufficient simulated cash.")
-    held = sum((o.qty if o.side == "BUY" else -o.qty) for o in db.query(PaperOrder).filter_by(account_id=a.id, symbol=body.symbol.upper()))
+    held = sum((o.qty if o.side == "BUY" else -o.qty) for o in db.query(PaperOrder).filter_by(account_id=a.id, symbol=symbol))
     if body.side == "SELL" and body.qty > held + 1e-9: raise HTTPException(422, "Cannot sell more than held (no shorting in MVP).")
     a.cash += -cost if body.side == "BUY" else cost
-    o = PaperOrder(account_id=a.id, symbol=body.symbol.upper(), side=body.side, qty=body.qty, fill_price=px, reason="manual")
+    o = PaperOrder(account_id=a.id, symbol=symbol, side=body.side, qty=body.qty, fill_price=px, reason="manual",
+                   stop_price=body.stop_loss_price, take_profit_price=body.take_profit_price)
     db.add(o); db.commit()
-    return {"order_id": o.id, "fill_price": o.fill_price, "label": o.label}
+    return {"order_id": o.id, "fill_price": o.fill_price, "label": o.label,
+            "symbol": symbol, "side": body.side, "qty": body.qty}
 
 @router.post("/accounts/{aid}/control/{action}")
 def control(aid: int, action: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_dep)):
@@ -294,10 +322,21 @@ def place_deployment_order(did: int, body: OrderIn, db: Session = Depends(get_db
         raise HTTPException(403, "Not authorized")
     if deployment.status != "ACTIVE":
         raise HTTPException(409, f"Deployment is {deployment.status}; orders blocked.")
+    symbol = _resolve_symbol(body.symbol)
     
     try:
-        order = paper.place_manual_order(db, did, body.symbol.upper(), body.side, body.qty, "manual")
-        return paper.get_deployment_state(db, deployment)
+        order = paper.place_manual_order(
+            db, did, symbol, body.side, body.qty, "manual",
+            stop_loss_price=body.stop_loss_price, take_profit_price=body.take_profit_price,
+        )
+        state = paper.get_deployment_state(db, deployment)
+        # Additive field: lets the terminal show the actual simulated fill
+        # without changing the existing deployment state contract.
+        state["order"] = next(
+            (o for o in state.get("orders", []) if o.get("id") == order.id),
+            None,
+        )
+        return state
     except paper.PaperExecutionError as e:
         raise HTTPException(422 if e.code != "DEPLOYMENT_NOT_ACTIVE" and e.code != "ACCOUNT_NOT_RUNNING" else 409,
                            {"error": e.code, "message": e.message})

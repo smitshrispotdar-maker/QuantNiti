@@ -135,7 +135,7 @@ Detection is case-insensitive and matches substrings within sentences.
 {
   "schema_version": "1.0",
   "name": "EMA Crossover",
-  "instruments": ["BTC-USD"],
+  "instruments": ["^NSEI"],
   "timeframe": "1d",
   "indicators": [...],
   "entry_rules": [...],

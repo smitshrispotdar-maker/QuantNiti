@@ -460,7 +460,7 @@ export default function Research() {
                   className="w-full bg-ink border border-line rounded px-2 py-1 text-sm"
                   value={scheduleConfig.symbols.join(",")}
                   onChange={(e) => setScheduleConfig({ ...scheduleConfig, symbols: e.target.value.split(",").map(s => s.trim().toUpperCase()).filter(Boolean) })}
-                  placeholder="BTC-USD,ETH-USD"
+                  placeholder="^NSEI,^NSEBANK,RELIANCE.NS"
                 />
               </div>
 

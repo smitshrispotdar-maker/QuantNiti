@@ -79,8 +79,9 @@ class PaperOrder(Base):
     # Execution details
     transaction_cost_bps = Column(Float, default=0)
     slippage_bps = Column(Float, default=0)
-    # For stop loss / take profit tracking
+    # Risk levels attached to manual orders
     stop_price = Column(Float, nullable=True)
+    take_profit_price = Column(Float, nullable=True)
     limit_price = Column(Float, nullable=True)
 
 class PaperPosition(Base):
@@ -178,4 +179,5 @@ class WatchlistItem(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     symbol = Column(String, nullable=False)
+    position = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=now)

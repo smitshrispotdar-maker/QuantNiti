@@ -9,15 +9,15 @@ class TestNLPParser:
     """Tests for the rule-based NLP parser."""
     
     def test_parse_basic_buy(self):
-        spec, asks = parse("Buy BTC")
-        assert spec.instruments == ["BTC-USD"]
+        spec, asks = parse("Buy NIFTY 50")
+        assert spec.instruments == ["^NSEI"]
         assert len(asks) > 0  # Should ask for entry/exit details
     
     def test_parse_ema_crossover(self):
-        text = "Buy BTC when EMA 20 crosses above EMA 50, exit on cross below"
+        text = "Buy NIFTY 50 when EMA 20 crosses above EMA 50, exit on cross below"
         spec, asks = parse(text)
         
-        assert spec.instruments == ["BTC-USD"]
+        assert spec.instruments == ["^NSEI"]
         assert len(spec.indicators) == 2
         indicator_ids = {i.id for i in spec.indicators}
         assert "ema_20" in indicator_ids
@@ -40,10 +40,10 @@ class TestNLPParser:
         assert "sma_30" in indicator_ids
     
     def test_parse_rsi_below(self):
-        text = "Buy BTC when RSI is below 30"
+        text = "Buy NIFTY 50 when RSI is below 30"
         spec, asks = parse(text)
         
-        assert spec.instruments == ["BTC-USD"]
+        assert spec.instruments == ["^NSEI"]
         rsi_indicators = [i for i in spec.indicators if i.type == "RSI"]
         assert len(rsi_indicators) == 1
         assert rsi_indicators[0].params["period"] == 14  # default
@@ -74,76 +74,76 @@ class TestNLPParser:
         assert rsi_indicators[0].id == "rsi_10"
     
     def test_parse_stop_loss(self):
-        text = "Buy BTC, stop loss 5%"
+        text = "Buy NIFTY 50, stop loss 5%"
         spec, asks = parse(text)
         
         assert spec.risk.stop_loss_pct == 5
     
     def test_parse_stop_loss_alternative_format(self):
-        text = "Buy BTC with 3% stop"
+        text = "Buy NIFTY 50 with 3% stop"
         spec, asks = parse(text)
         
         assert spec.risk.stop_loss_pct == 3
     
     def test_parse_take_profit(self):
-        text = "Buy BTC, take profit 10%"
+        text = "Buy NIFTY 50, take profit 10%"
         spec, asks = parse(text)
         
         assert spec.risk.take_profit_pct == 10
     
     def test_parse_position_size(self):
-        text = "Buy BTC with position size 50%"
+        text = "Buy NIFTY 50 with position size 50%"
         spec, asks = parse(text)
         
         assert spec.risk.max_position_pct == 50
     
     def test_parse_risk_alternative_format(self):
-        text = "Buy BTC risk 25%"
+        text = "Buy NIFTY 50 risk 25%"
         spec, asks = parse(text)
         
         assert spec.risk.max_position_pct == 25
     
     def test_parse_timeframe_daily(self):
-        text = "Buy BTC daily"
+        text = "Buy NIFTY 50 daily"
         spec, asks = parse(text)
         
         assert spec.timeframe == "1d"
     
     def test_parse_timeframe_hourly(self):
-        text = "Buy BTC hourly"
+        text = "Buy NIFTY 50 hourly"
         spec, asks = parse(text)
         
         assert spec.timeframe == "1h"
     
     def test_parse_timeframe_15m(self):
-        text = "Buy BTC 15m"
+        text = "Buy NIFTY 50 15m"
         spec, asks = parse(text)
         
         assert spec.timeframe == "15m"
     
     def test_parse_multiple_instruments(self):
-        text = "Buy BTC and ETH"
+        text = "Buy NIFTY 50 and BANK NIFTY"
         spec, asks = parse(text)
         
-        assert set(spec.instruments) == {"BTC-USD", "ETH-USD"}
+        assert set(spec.instruments) == {"^NSEI", "^NSEBANK"}
     
     def test_parse_apple_stock(self):
-        text = "Buy AAPL"
+        text = "Buy RELIANCE"
         spec, asks = parse(text)
         
-        assert spec.instruments == ["AAPL"]
+        assert spec.instruments == ["RELIANCE.NS"]
     
     def test_parse_spy(self):
-        text = "Buy SPY"
+        text = "Buy TCS"
         spec, asks = parse(text)
         
-        assert spec.instruments == ["SPY"]
+        assert spec.instruments == ["TCS.NS"]
     
     def test_parse_combined_strategy(self):
-        text = "Buy BTC when EMA 20 crosses above EMA 50, stop loss 5%, take profit 10%, size 30%"
+        text = "Buy NIFTY 50 when EMA 20 crosses above EMA 50, stop loss 5%, take profit 10%, size 30%"
         spec, asks = parse(text)
         
-        assert spec.instruments == ["BTC-USD"]
+        assert spec.instruments == ["^NSEI"]
         assert len(spec.indicators) == 2
         assert spec.risk.stop_loss_pct == 5
         assert spec.risk.take_profit_pct == 10
@@ -154,14 +154,14 @@ class TestNLPParser:
     def test_parse_with_base_spec(self):
         """Test parsing with an existing base spec (conversation continuation)."""
         base = StrategySpec(
-            instruments=["BTC-USD"],
+            instruments=["^NSEI"],
             indicators=[IndicatorSpec(id="ema_20", type="EMA", params={"period": 20})],
             entry_rules=[Rule(left="ema_20", op=">", right="price")],
         )
         spec, asks = parse("add stop loss 3%", base=base)
         
         # Should preserve base and add stop loss
-        assert spec.instruments == ["BTC-USD"]
+        assert spec.instruments == ["^NSEI"]
         assert len(spec.indicators) == 1
         assert spec.risk.stop_loss_pct == 3
         assert len(spec.entry_rules) == 1
@@ -172,19 +172,19 @@ class TestNLPParser:
         assert "instrument" in " ".join(asks).lower()
     
     def test_parse_clarifications_missing_entry(self):
-        spec, asks = parse("Buy BTC")
+        spec, asks = parse("Buy NIFTY 50")
         
         assert any("entry" in a.lower() for a in asks)
     
     def test_parse_clarifications_missing_exit(self):
-        spec, asks = parse("Buy BTC when EMA 20 crosses above EMA 50")
+        spec, asks = parse("Buy NIFTY 50 when EMA 20 crosses above EMA 50")
         
         # Has entry but no explicit exit (only crossover exit)
         # The parser adds symmetric exit for crossovers
         assert len(spec.exit_rules) == 1
     
     def test_parse_clarifications_long_and_short(self):
-        spec, asks = parse("Buy BTC and short ETH")
+        spec, asks = parse("Buy NIFTY 50 and short BANK NIFTY")
         
         assert any("long and short" in a.lower() or "short" in a.lower() for a in asks)
     
@@ -197,27 +197,27 @@ class TestNLPParser:
         assert any("sell" in a.lower() and "rsi" in a.lower() and ("low" in a.lower() or "below" in a.lower()) for a in asks)
     
     def test_parse_case_insensitive(self):
-        spec1, _ = parse("BUY BTC")
-        spec2, _ = parse("buy btc")
-        spec3, _ = parse("Buy Btc")
+        spec1, _ = parse("BUY NIFTY 50")
+        spec2, _ = parse("buy nifty 50")
+        spec3, _ = parse("Buy Nifty 50")
         
-        assert spec1.instruments == spec2.instruments == spec3.instruments == ["BTC-USD"]
+        assert spec1.instruments == spec2.instruments == spec3.instruments == ["^NSEI"]
     
     def test_parse_extra_whitespace(self):
-        spec, _ = parse("  Buy   BTC  when  EMA 20  crosses  above  EMA 50  ")
+        spec, _ = parse("  Buy   NIFTY 50  when  EMA 20  crosses  above  EMA 50  ")
         
-        assert spec.instruments == ["BTC-USD"]
+        assert spec.instruments == ["^NSEI"]
         assert len(spec.indicators) == 2
     
     def test_parse_ethereum_alias(self):
-        spec, _ = parse("Buy Ethereum")
+        spec, _ = parse("Buy BANK NIFTY")
         
-        assert spec.instruments == ["ETH-USD"]
+        assert spec.instruments == ["^NSEBANK"]
     
     def test_parse_bitcoin_alias(self):
-        spec, _ = parse("Buy Bitcoin")
+        spec, _ = parse("Buy NIFTY 50")
         
-        assert spec.instruments == ["BTC-USD"]
+        assert spec.instruments == ["^NSEI"]
 
 
 class TestNLPEdgeCases:
@@ -245,7 +245,7 @@ class TestNLPEdgeCases:
     
     def test_parse_duplicate_indicators(self):
         """Same indicator mentioned twice should not duplicate."""
-        text = "Buy BTC when EMA 20 crosses above EMA 50 and EMA 20 crosses above EMA 50"
+        text = "Buy NIFTY 50 when EMA 20 crosses above EMA 50 and EMA 20 crosses above EMA 50"
         spec, _ = parse(text)
         
         ema_20_count = sum(1 for i in spec.indicators if i.id == "ema_20")
@@ -259,7 +259,7 @@ class TestNLPEdgeCases:
         assert rsi_ind[0].params["period"] == 14
     
     def test_parse_decimal_percentages(self):
-        text = "Buy BTC stop loss 2.5% take profit 7.5% size 12.5%"
+        text = "Buy NIFTY 50 stop loss 2.5% take profit 7.5% size 12.5%"
         spec, _ = parse(text)
         
         assert spec.risk.stop_loss_pct == 2.5
@@ -290,7 +290,7 @@ class TestActionDetection:
     
     def test_no_action_for_regular_text(self):
         """Test that regular strategy text doesn't trigger actions."""
-        for text in ["buy BTC when RSI below 30", "EMA 20 crosses above EMA 50", "stop loss 5%"]:
+        for text in ["buy NIFTY 50 when RSI below 30", "EMA 20 crosses above EMA 50", "stop loss 5%"]:
             action, _ = detect_action(text)
             assert action is None, f"Unexpected action for: {text}"
     
